@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Перечень рецензируемых изданий ВАК — поиск</title>
+  <meta name="description" content="Поиск журналов и научных специальностей в Перечне рецензируемых научных изданий ВАК с датами включения и исключения.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="brand">
+        <h1>Перечень рецензируемых научных изданий ВАК</h1>
+        <p class="subtitle" id="meta-as-of">Загрузка…</p>
+      </div>
+      <p class="disclaimer">
+        Неофициальный справочник по данным PDF ВАК.
+        <a id="link-official" href="https://vak.gisnauka.ru/documents/editions" target="_blank" rel="noopener">Официальный документ</a>
+      </p>
+    </div>
+  </header>
+
+  <main class="container" id="app" hidden>
+    <section class="controls card">
+      <div class="mode-tabs" role="tablist" aria-label="Режим поиска">
+        <button type="button" role="tab" id="tab-journal" class="tab active" aria-selected="true" data-mode="journal">
+          Журнал → специальности
+        </button>
+        <button type="button" role="tab" id="tab-spec" class="tab" aria-selected="false" data-mode="spec">
+          Специальность → журналы
+        </button>
+      </div>
+
+      <label class="field">
+        <span class="field-label" id="search-label">Журнал</span>
+        <input type="search" id="search" class="input" placeholder="Название, ISSN или № в перечне" autocomplete="off" spellcheck="false">
+      </label>
+
+      <div class="filter-row">
+        <label class="checkbox">
+          <input type="checkbox" id="filter-date">
+          <span>Только актуальные на дату</span>
+        </label>
+        <input type="date" id="date" class="input input-date" disabled>
+      </div>
+
+      <ul class="suggestions" id="suggestions" hidden></ul>
+      <p class="hint" id="search-hint"></p>
+    </section>
+
+    <section class="results card" id="results-panel" hidden>
+      <header class="results-header">
+        <h2 id="results-title"></h2>
+        <p class="results-meta" id="results-meta"></p>
+      </header>
+      <div id="results-body"></div>
+    </section>
+
+    <section class="empty card" id="empty-state">
+      <p>Начните вводить название журнала, код специальности (например <code>5.6.4.</code> или <code>10.01.02</code>) или ISSN.</p>
+    </section>
+  </main>
+
+  <div class="loading" id="loading">
+    <p>Загрузка данных…</p>
+  </div>
+
+  <footer class="site-footer">
+    <p>
+      <a href="https://github.com/eugenpt/vak-journals" target="_blank" rel="noopener">Исходный код</a>
+      · MIT · данные из официального PDF
+    </p>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/minisearch@7.1.2/dist/umd/index.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

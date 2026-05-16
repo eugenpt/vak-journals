@@ -19,6 +19,9 @@ PDF_PATH = DATA_DIR / "vak_peer_reviewed_journals.pdf"
 JOURNALS_XLSX = OUTPUT_DIR / "journals.xlsx"
 STRUCTURED_XLSX = OUTPUT_DIR / "journals_structured.xlsx"
 
+DOCS_DIR = ROOT / "docs"
+JSON_DATA = DOCS_DIR / "data" / "vak.json"
+
 
 def read_source_location() -> str:
     """First non-empty, non-comment line from SOURCE_URL.txt."""

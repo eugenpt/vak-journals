@@ -10,6 +10,8 @@ from pathlib import Path
 from config import AS_OF_LABEL, JOURNALS_XLSX, PDF_PATH, STRUCTURED_XLSX, pdf_path_for_parsing, source_kind
 from config import read_source_location
 from download import fetch_pdf
+from config import JSON_DATA
+from export_json import write_json
 from extract_journals import parse_all as extract_all, write_xlsx as write_journals
 from parse_structured import parse_all as parse_structured_all, write_xlsx as write_structured
 
@@ -39,7 +41,11 @@ def build(
     stats = write_structured(journals, STRUCTURED_XLSX)
     print(f"  -> {STRUCTURED_XLSX}")
 
-    return {"pdf": str(pdf), "journals": len(rows), **stats}
+    print(f"\n=== export_json (docs) ===")
+    json_path = write_json(journals, JSON_DATA)
+    print(f"  -> {json_path} ({json_path.stat().st_size:,} bytes)")
+
+    return {"pdf": str(pdf), "journals": len(rows), "json": str(json_path), **stats}
 
 
 def main() -> int:

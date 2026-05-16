@@ -40,7 +40,8 @@ pip install -r requirements.txt
 | `download.py` | Скачать PDF по URL из `SOURCE_URL.txt` или проверить локальный путь |
 | `extract_journals.py` | PDF → `output/journals.xlsx` |
 | `parse_structured.py` | PDF → `output/journals_structured.xlsx` (журналы, специальности, связи, даты) |
-| `build.py` | Всё сразу |
+| `build.py` | Всё сразу (XLSX + `docs/data/vak.json` для сайта) |
+| `export_json.py` | Только JSON для фронтенда |
 
 ```bash
 python download.py
@@ -70,6 +71,23 @@ python parse_structured.py --pdf data/vak_peer_reviewed_journals.pdf
 3. `python download.py --force` (для URL) или укажите локальный путь к скачанному PDF.
 4. `python build.py`
 
+## Сайт (GitHub Pages)
+
+Статический поиск в каталоге `docs/`: журнал → специальности с датами и обратно, фильтр «актуально на дату».
+
+После `python build.py --download` откройте локально:
+
+```bash
+cd docs
+python -m http.server 8080
+```
+
+→ http://localhost:8080
+
+Публикация: в настройках репозитория включите **Pages → Source: GitHub Actions**. При push в `main` workflow собирает JSON из PDF и деплоит `docs/`.
+
+Сайт: **https://eugenpt.github.io/vak-journals/**
+
 ## Структура
 
 ```
@@ -81,9 +99,12 @@ vak-journals/
 ├── extract_journals.py
 ├── parse_structured.py
 ├── build.py
+├── export_json.py
 ├── requirements.txt
-├── data/      # PDF (gitignored)
-└── output/    # XLSX (gitignored)
+├── docs/              # GitHub Pages (index.html, data/vak.json)
+├── .github/workflows/ # pages.yml
+├── data/              # PDF (gitignored)
+└── output/            # XLSX (gitignored)
 ```
 
 `parse_structured.py` импортирует разбор журналов из `extract_journals.py` — отдельный пакет не нужен: это один репозиторий-утилита из нескольких файлов.
