@@ -11,6 +11,7 @@ data/*.pdf
 # Generated outputs (rebuild with scripts)
 output/*
 !output/.gitkeep
+docs/data/vak.json
 
 # Editor
 .idea/
