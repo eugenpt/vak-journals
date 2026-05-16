@@ -239,12 +239,21 @@
     };
   }
 
+  function specialtyActiveOn(s, isoDate) {
+    if (!isoDate) return true;
+    return (linksBySpec.get(s.id) || []).some((link) => activeOn(link, isoDate));
+  }
+
   function searchSpecialties(q, limit = 12) {
     const needle = q.trim();
     const normalizedNeedle = normalizeForMatch(needle);
+    const iso = filterIso();
+    const candidates = iso
+      ? data.specialties.filter((s) => specialtyActiveOn(s, iso))
+      : data.specialties;
 
     if (!isNumericQuery(q)) {
-      return data.specialties
+      return candidates
         .filter((s) => {
           return normalizeForMatch([s.code, s.branch, s.title].filter(Boolean).join(" ")).includes(
             normalizedNeedle
@@ -255,11 +264,17 @@
         .map(specialtyHit);
     }
 
-    return data.specialties
+    return candidates
       .filter((s) => s.code.startsWith(needle))
       .sort((a, b) => a.code.localeCompare(b.code, "ru-RU", { numeric: true }))
       .slice(0, limit)
       .map(specialtyHit);
+  }
+
+  function refreshSearchIfTyping() {
+    const query = el.search.value.trim();
+    if (!query || selectedJournal != null || selectedSpec != null) return;
+    runSearch(query);
   }
 
   function specialtyQuery(s) {
@@ -626,6 +641,8 @@
 
     const today = new Date().toISOString().slice(0, 10);
     el.date.value = today;
+    el.filterDate.checked = true;
+    el.date.disabled = false;
 
     el.loading.hidden = true;
     el.app.hidden = false;
@@ -667,10 +684,12 @@
   el.filterDate.addEventListener("change", () => {
     el.date.disabled = !el.filterDate.checked;
     if (selectedJournal != null || selectedSpec != null) showResults();
+    refreshSearchIfTyping();
   });
 
   el.date.addEventListener("change", () => {
     if (selectedJournal != null || selectedSpec != null) showResults();
+    refreshSearchIfTyping();
   });
 
   document.addEventListener("click", (e) => {
