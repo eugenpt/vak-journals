@@ -88,6 +88,20 @@ python -m http.server 8080
 
 Сайт: **https://eugenpt.github.io/vak-journals/**
 
+### Белый список РЦНИ
+
+В карточке журнала сайт делает live-запрос к Cloudflare Worker:
+
+```text
+https://vak-journals-proxy.eugen-pt.workers.dev/?issn=2587-7534
+```
+
+Worker проксирует официальный API РЦНИ `journalrank.rcsi.science`, потому что браузерный `fetch` с GitHub Pages не может читать этот API напрямую без CORS-заголовков. Код Worker лежит в [`workers/rcsi-proxy.js`](workers/rcsi-proxy.js); CORS разрешён для опубликованного сайта и `http://localhost:8080`.
+
+Чтобы обновить Worker: Cloudflare → Workers & Pages → `vak-journals-proxy` → Edit code → вставить содержимое `workers/rcsi-proxy.js` → Deploy.
+
+На сайте этот блок подписан как **«Белый список РЦНИ (уровень 1–4)»**. Это не категории ВАК К1–К3.
+
 ### Статистика (Яндекс.Метрика)
 
 Для русскоязычной аудитории Метрика уместнее Google Analytics: визиты, поисковые запросы, карта кликов.
@@ -114,6 +128,7 @@ vak-journals/
 ├── export_json.py
 ├── requirements.txt
 ├── docs/              # GitHub Pages (index.html, data/vak.json)
+├── workers/           # Cloudflare Worker для live-запросов РЦНИ
 ├── .github/workflows/ # pages.yml
 ├── data/              # PDF (gitignored)
 └── output/            # XLSX (gitignored)

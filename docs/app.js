@@ -15,7 +15,9 @@
   let selectedSpec = null;
   const validModes = new Set(["journal", "spec"]);
   const urlStateDebounceMs = 300;
+  const rcsiProxyUrl = "https://vak-journals-proxy.eugen-pt.workers.dev/";
   let urlStateTimer = null;
+  let rcsiRequestSeq = 0;
 
   const el = {
     loading: $("#loading"),
@@ -236,6 +238,94 @@
     return url.href;
   }
 
+  function rcsiSearchUrl(j) {
+    const url = new URL("https://journalrank.rcsi.science/ru/record-sources/");
+    url.searchParams.set("s", j.issn || j.name);
+    url.searchParams.set("adv", "true");
+    return url.href;
+  }
+
+  function rcsiDetailsUrl(record) {
+    if (record.id) {
+      return `https://journalrank.rcsi.science/ru/record-sources/details/${encodeURIComponent(record.id)}/`;
+    }
+    if (record.url) {
+      return new URL(record.url, "https://journalrank.rcsi.science/ru/").href;
+    }
+    return null;
+  }
+
+  function formatRcsiDate(iso) {
+    if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+    const [y, m, d] = iso.split("-");
+    return `${d}.${m}.${y}`;
+  }
+
+  function renderRcsiShell(j) {
+    return `<section class="rcsi-card" id="rcsi-card">
+      <div class="rcsi-status" id="rcsi-status"></div>
+      <a href="${escapeHtml(rcsiSearchUrl(j))}" target="_blank" rel="noopener">
+        Проверить в официальном поиске РЦНИ
+      </a>
+    </section>`;
+  }
+
+  function renderRcsiInfo(record) {
+    const levelParts = [
+      record.level_2025 == null ? null : `2025: уровень ${escapeHtml(record.level_2025)}`,
+      record.level_2023 == null ? null : `2023: уровень ${escapeHtml(record.level_2023)}`,
+    ].filter(Boolean);
+    const dateParts = [
+      formatRcsiDate(record.dateAccepted)
+        ? `включён ${escapeHtml(formatRcsiDate(record.dateAccepted))}`
+        : null,
+      formatRcsiDate(record.dateDiscontinued)
+        ? `исключён ${escapeHtml(formatRcsiDate(record.dateDiscontinued))}`
+        : null,
+    ].filter(Boolean);
+    const detailsUrl = rcsiDetailsUrl(record);
+    const rows = [];
+
+    if (!levelParts.length && !dateParts.length) {
+      return "";
+    }
+
+    rows.push(`<div class="rcsi-heading">
+      <strong>Белый список РЦНИ</strong>
+      <span class="rcsi-note">уровень 1–4, не категория ВАК К1–К3</span>
+    </div>`);
+    if (levelParts.length) {
+      rows.push(`<p class="rcsi-levels">${levelParts.join(" · ")}</p>`);
+    }
+    if (dateParts.length) {
+      rows.push(`<p class="rcsi-dates">${dateParts.join(" · ")}</p>`);
+    }
+    if (detailsUrl) {
+      rows.push(
+        `<p><a href="${escapeHtml(detailsUrl)}" target="_blank" rel="noopener">Карточка РЦНИ</a></p>`
+      );
+    }
+
+    return rows.join("");
+  }
+
+  async function loadRcsiInfo(j, requestId) {
+    const status = $("#rcsi-status");
+    if (!status || !j.issn) return;
+
+    try {
+      const url = new URL(rcsiProxyUrl);
+      url.searchParams.set("issn", j.issn);
+      const res = await fetch(url.href, { headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const record = await res.json();
+      if (requestId !== rcsiRequestSeq || selectedJournal !== j.n) return;
+      status.innerHTML = renderRcsiInfo(record);
+    } catch (_err) {
+      if (requestId === rcsiRequestSeq) status.textContent = "";
+    }
+  }
+
   function runSearch(q) {
     if (!q || q.length < 2) {
       el.suggestions.hidden = true;
@@ -287,9 +377,13 @@
       .filter(Boolean)
       .join(" · ");
 
+    const rcsiRequestId = ++rcsiRequestSeq;
+
     if (!links.length) {
       el.resultsBody.innerHTML =
-        "<p class=\"hint\">Нет специальностей для выбранных условий (проверьте фильтр по дате).</p>";
+        `${renderRcsiShell(j)}
+        <p class="hint">Нет специальностей для выбранных условий (проверьте фильтр по дате).</p>`;
+      loadRcsiInfo(j, rcsiRequestId);
       return;
     }
 
@@ -300,7 +394,7 @@
       groups.get(key).push(link);
     }
 
-    let html = "";
+    let html = renderRcsiShell(j);
     const sortedGroups = [...groups.keys()].sort((a, b) => a - b);
     for (const g of sortedGroups) {
       const items = groups.get(g);
@@ -330,6 +424,7 @@
       html += "</ul>";
     }
     el.resultsBody.innerHTML = html;
+    loadRcsiInfo(j, rcsiRequestId);
   }
 
   function renderSpecResults(specId) {

@@ -243,6 +243,50 @@ body {
   font-size: 0.9rem;
 }
 
+.rcsi-card {
+  margin: 1rem 0 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.rcsi-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.6rem;
+  align-items: baseline;
+}
+
+.rcsi-note,
+.rcsi-status {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.rcsi-status {
+  margin-top: 0.35rem;
+}
+
+.rcsi-status p {
+  margin: 0.2rem 0 0;
+}
+
+.rcsi-levels {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.rcsi-dates {
+  color: var(--muted);
+}
+
+.rcsi-card a {
+  display: inline-block;
+  margin-top: 0.4rem;
+  color: var(--accent);
+}
+
 .result-list {
   margin: 1rem 0 0;
   padding: 0;
