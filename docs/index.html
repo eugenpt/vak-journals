@@ -17,6 +17,7 @@
       <p class="disclaimer">
         Неофициальный справочник по данным PDF ВАК.
         <a id="link-official" href="https://vak.gisnauka.ru/documents/editions" target="_blank" rel="noopener">Официальный документ</a>
+        <span id="analytics-note" hidden> · <a href="https://yandex.ru/legal/confidential/" target="_blank" rel="noopener">Метрика</a> (статистика посещений)</span>
       </p>
     </div>
   </header>
@@ -73,7 +74,14 @@
     </p>
   </footer>
 
+  <script src="site-config.js"></script>
+  <script src="metrika.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/minisearch@7.1.2/dist/umd/index.js"></script>
   <script src="app.js"></script>
+  <script>
+    if (document.body.dataset.metrika) {
+      document.getElementById("analytics-note").hidden = false;
+    }
+  </script>
 </body>
 </html>
