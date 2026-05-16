@@ -9,13 +9,30 @@
   const linksBySpec = new Map();
 
   let data = null;
-  let mode = "journal";
+  let mode = "spec";
   let journalSearch = null;
   let selectedJournal = null;
   let selectedSpec = null;
   const validModes = new Set(["journal", "spec"]);
   const urlStateDebounceMs = 300;
   const rcsiProxyUrl = "https://vak-journals-proxy.eugen-pt.workers.dev/";
+  const defaultTitle = "Перечень рецензируемых изданий ВАК — поиск";
+  const defaultDescription =
+    "Поиск журналов ВАК для публикаций по кандидатским и докторским диссертациям: научные специальности, ISSN, даты включения и исключения из перечня.";
+  const popularSpecCodes = [
+    "5.2.3.",
+    "2.3.1.",
+    "5.2.6.",
+    "5.8.7.",
+    "5.8.2.",
+    "2.3.3.",
+    "2.3.4.",
+    "5.2.4.",
+    "5.8.1.",
+    "1.2.2.",
+    "5.3.9.",
+    "12.00.08",
+  ];
   let urlStateTimer = null;
   let rcsiRequestSeq = 0;
 
@@ -34,12 +51,37 @@
     resultsMeta: $("#results-meta"),
     resultsBody: $("#results-body"),
     emptyState: $("#empty-state"),
+    popularSpecialties: $("#popular-specialties"),
     tabJournal: $("#tab-journal"),
     tabSpec: $("#tab-spec"),
   };
 
   function dataUrl() {
     return new URL("data/vak.json", window.location.href).href;
+  }
+
+  function setMeta(name, value) {
+    const tag = document.querySelector(`meta[name="${name}"]`);
+    if (tag) tag.setAttribute("content", value);
+  }
+
+  function setPropertyMeta(property, value) {
+    const tag = document.querySelector(`meta[property="${property}"]`);
+    if (tag) tag.setAttribute("content", value);
+  }
+
+  function setPageMeta(title, description) {
+    document.title = title;
+    setMeta("description", description);
+    setMeta("twitter:title", title);
+    setMeta("twitter:description", description);
+    setPropertyMeta("og:title", title);
+    setPropertyMeta("og:description", description);
+    setPropertyMeta("og:url", window.location.href);
+  }
+
+  function resetPageMeta() {
+    setPageMeta(defaultTitle, defaultDescription);
   }
 
   function activeOn(link, isoDate) {
@@ -85,11 +127,15 @@
       .toLocaleLowerCase("ru-RU");
   }
 
+  function normalizeSpecCode(code) {
+    return String(code || "").replace(/\s+/g, "").replace(/\.$/, "");
+  }
+
   function readUrlState() {
     const params = new URLSearchParams(window.location.search);
     const urlMode = params.get("mode");
     return {
-      mode: validModes.has(urlMode) ? urlMode : "journal",
+      mode: validModes.has(urlMode) ? urlMode : "spec",
       query: params.get("q") || "",
       journal: Number(params.get("journal")) || null,
       spec: Number(params.get("spec")) || null,
@@ -174,6 +220,7 @@
     el.resultsPanel.hidden = true;
     el.emptyState.hidden = false;
     el.searchHint.textContent = "";
+    resetPageMeta();
     if (syncUrl) writeUrlState();
     if (focus) el.search.focus();
   }
@@ -236,6 +283,56 @@
     url.searchParams.set("journal", String(j.n));
     url.searchParams.delete("spec");
     return url.href;
+  }
+
+  function specialtyJournalCount(s) {
+    return (linksBySpec.get(s.id) || []).length;
+  }
+
+  function renderPopularSpecialties() {
+    if (!el.popularSpecialties) return;
+
+    const selected = [];
+    const selectedIds = new Set();
+    const bestByCode = new Map();
+
+    for (const s of data.specialties) {
+      const code = normalizeSpecCode(s.code);
+      const current = bestByCode.get(code);
+      if (!current || specialtyJournalCount(s) > specialtyJournalCount(current)) {
+        bestByCode.set(code, s);
+      }
+    }
+
+    for (const code of popularSpecCodes) {
+      const s = bestByCode.get(normalizeSpecCode(code));
+      if (s && !selectedIds.has(s.id)) {
+        selected.push(s);
+        selectedIds.add(s.id);
+      }
+    }
+
+    const topByJournalCount = [...data.specialties].sort(
+      (a, b) => specialtyJournalCount(b) - specialtyJournalCount(a)
+    );
+    for (const s of topByJournalCount) {
+      if (selected.length >= 16) break;
+      if (!selectedIds.has(s.id)) {
+        selected.push(s);
+        selectedIds.add(s.id);
+      }
+    }
+
+    el.popularSpecialties.innerHTML = selected
+      .map((s) => {
+        const branch = s.branch ? `<span>${escapeHtml(s.branch)}</span>` : "";
+        return `<a class="popular-card" href="${escapeHtml(specialtyUrl(s))}">
+          <strong>${escapeHtml(s.code)} ${escapeHtml(s.title)}</strong>
+          ${branch}
+          <small>${specialtyJournalCount(s)} журналов ВАК</small>
+        </a>`;
+      })
+      .join("");
   }
 
   function rcsiSearchUrl(j) {
@@ -376,6 +473,10 @@
     ]
       .filter(Boolean)
       .join(" · ");
+    setPageMeta(
+      `${j.name} — журнал ВАК`,
+      `Журнал «${j.name}» в Перечне ВАК: ISSN ${j.issn || "не указан"}, ${links.length} специальностей${iso ? ` на ${formatIsoRu(iso)}` : ""}.`
+    );
 
     const rcsiRequestId = ++rcsiRequestSeq;
 
@@ -442,6 +543,10 @@
     ]
       .filter(Boolean)
       .join(" · ");
+    setPageMeta(
+      `${s.code} ${s.title} — журналы ВАК`,
+      `Журналы из Перечня ВАК по специальности ${s.code} ${s.title}: ${links.length} журналов${iso ? ` на ${formatIsoRu(iso)}` : ""}.`
+    );
 
     if (!links.length) {
       el.resultsBody.innerHTML =
@@ -512,6 +617,7 @@
     for (const s of data.specialties) specById.set(s.id, s);
     indexLinks();
     initSearch();
+    renderPopularSpecialties();
 
     el.metaAsOf.textContent = data.meta.as_of_label || `по состоянию на ${data.meta.as_of}`;
     if (data.meta.editions_url) {
@@ -534,6 +640,7 @@
     selectedSpec = null;
     el.resultsPanel.hidden = true;
     el.emptyState.hidden = false;
+    resetPageMeta();
     runSearch(el.search.value.trim());
     debounceUrlState();
   });

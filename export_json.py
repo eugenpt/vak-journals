@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 
-from config import AS_OF_DATE, AS_OF_LABEL, EDITIONS_PAGE, ROOT
+from config import AS_OF_DATE, AS_OF_LABEL, EDITIONS_PAGE, ROOT, SITE_URL, SITEMAP_XML
 from parse_structured import JournalSpecs, parse_all
 
 DOCS_DATA = ROOT / "docs" / "data" / "vak.json"
@@ -93,6 +94,27 @@ def build_payload(journals: list[JournalSpecs]) -> dict:
     }
 
 
+def build_sitemap() -> str:
+    # The current site is a single-page app. Listing every query URL here would
+    # advertise many URLs that all serve the same static HTML before JS runs.
+    urls = [SITE_URL]
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ]
+    for url in urls:
+        lines.extend(
+            [
+                "  <url>",
+                f"    <loc>{xml_escape(url)}</loc>",
+                "    <changefreq>monthly</changefreq>",
+                "  </url>",
+            ]
+        )
+    lines.append("</urlset>")
+    return "\n".join(lines) + "\n"
+
+
 def write_json(journals: list[JournalSpecs], out_path: Path | None = None) -> Path:
     out_path = out_path or DOCS_DATA
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -101,6 +123,7 @@ def write_json(journals: list[JournalSpecs], out_path: Path | None = None) -> Pa
         json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
         encoding="utf-8",
     )
+    SITEMAP_XML.write_text(build_sitemap(), encoding="utf-8")
     return out_path
 
 

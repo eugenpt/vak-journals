@@ -57,6 +57,12 @@ body {
   font-size: 0.95rem;
 }
 
+.meta-subtitle {
+  margin-top: 0.25rem;
+  opacity: 0.78;
+  font-size: 0.875rem;
+}
+
 .disclaimer {
   margin: 1rem 0 0;
   font-size: 0.875rem;
@@ -81,6 +87,67 @@ body {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 1.25rem 1.35rem;
+}
+
+.intro p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.popular h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.popular-intro {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.popular-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.popular-card {
+  display: block;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: inherit;
+  text-decoration: none;
+}
+
+.popular-card:hover,
+.popular-card:focus {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.popular-card strong,
+.popular-card span,
+.popular-card small {
+  display: block;
+}
+
+.popular-card strong {
+  line-height: 1.35;
+}
+
+.popular-card span {
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.popular-card small {
+  margin-top: 0.35rem;
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .mode-tabs {

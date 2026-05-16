@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 SOURCE_URL_FILE = ROOT / "SOURCE_URL.txt"
 EDITIONS_PAGE = "https://vak.gisnauka.ru/documents/editions"
+SITE_URL = "https://eugenpt.github.io/vak-journals/"
 
 # As stated in the official PDF title (по состоянию на …)
 AS_OF_DATE = "10.04.2026"
@@ -21,6 +22,7 @@ STRUCTURED_XLSX = OUTPUT_DIR / "journals_structured.xlsx"
 
 DOCS_DIR = ROOT / "docs"
 JSON_DATA = DOCS_DIR / "data" / "vak.json"
+SITEMAP_XML = DOCS_DIR / "sitemap.xml"
 
 
 def read_source_location() -> str:

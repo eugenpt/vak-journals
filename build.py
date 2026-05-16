@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from config import AS_OF_LABEL, JOURNALS_XLSX, PDF_PATH, STRUCTURED_XLSX, pdf_path_for_parsing, source_kind
+from config import AS_OF_LABEL, JOURNALS_XLSX, PDF_PATH, SITEMAP_XML, STRUCTURED_XLSX, pdf_path_for_parsing, source_kind
 from config import read_source_location
 from download import fetch_pdf
 from config import JSON_DATA
@@ -44,6 +44,7 @@ def build(
     print(f"\n=== export_json (docs) ===")
     json_path = write_json(journals, JSON_DATA)
     print(f"  -> {json_path} ({json_path.stat().st_size:,} bytes)")
+    print(f"  -> {SITEMAP_XML} ({SITEMAP_XML.stat().st_size:,} bytes)")
 
     return {"pdf": str(pdf), "journals": len(rows), "json": str(json_path), **stats}
 

@@ -4,8 +4,32 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Перечень рецензируемых изданий ВАК — поиск</title>
-  <meta name="description" content="Поиск журналов и научных специальностей в Перечне рецензируемых научных изданий ВАК с датами включения и исключения.">
+  <meta name="description" content="Поиск журналов ВАК для публикаций по кандидатским и докторским диссертациям: научные специальности, ISSN, даты включения и исключения из перечня.">
+  <meta name="keywords" content="ВАК, журналы ВАК, перечень ВАК, рецензируемые научные издания, научные журналы, кандидатская диссертация, докторская диссертация, публикации для диссертации, публикация ВАК, научные специальности, паспорт специальности, ВАК журнал по специальности">
+  <meta name="robots" content="index, follow, max-snippet:-1">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="ru_RU">
+  <meta property="og:title" content="Перечень рецензируемых изданий ВАК — поиск">
+  <meta property="og:description" content="Поиск журналов ВАК для публикаций по кандидатским и докторским диссертациям: научные специальности, ISSN, даты включения и исключения из перечня.">
+  <meta property="og:url" content="https://eugenpt.github.io/vak-journals/">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Перечень рецензируемых изданий ВАК — поиск">
+  <meta name="twitter:description" content="Поиск журналов ВАК для публикаций по кандидатским и докторским диссертациям: научные специальности, ISSN, даты включения и исключения из перечня.">
   <link rel="stylesheet" href="style.css">
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "Перечень рецензируемых научных изданий ВАК",
+      "url": "https://eugenpt.github.io/vak-journals/",
+      "inLanguage": "ru-RU",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": "https://eugenpt.github.io/vak-journals/?mode=journal&q={search_term_string}",
+        "query-input": "required name=search_term_string"
+      }
+    }
+  </script>
 </head>
 <body>
   <!-- Yandex.Metrika counter -->
@@ -26,7 +50,8 @@
     <div class="header-inner">
       <div class="brand">
         <h1>Перечень рецензируемых научных изданий ВАК</h1>
-        <p class="subtitle" id="meta-as-of">Загрузка…</p>
+        <p class="subtitle">Поиск журналов для публикаций по кандидатским и докторским диссертациям</p>
+        <p class="subtitle meta-subtitle" id="meta-as-of">Загрузка…</p>
       </div>
       <p class="disclaimer">
         Неофициальный справочник по данным PDF ВАК.
@@ -37,19 +62,25 @@
   </header>
 
   <main class="container" id="app" hidden>
+    <section class="intro card">
+      <p>
+        Справочник помогает подобрать журнал из перечня ВАК по научной специальности, ISSN или названию для публикации результатов кандидатской или докторской диссертации.
+      </p>
+    </section>
+
     <section class="controls card">
       <div class="mode-tabs" role="tablist" aria-label="Режим поиска">
-        <button type="button" role="tab" id="tab-journal" class="tab active" aria-selected="true" data-mode="journal">
-          Журнал → специальности
-        </button>
-        <button type="button" role="tab" id="tab-spec" class="tab" aria-selected="false" data-mode="spec">
+        <button type="button" role="tab" id="tab-spec" class="tab active" aria-selected="true" data-mode="spec">
           Специальность → журналы
+        </button>
+        <button type="button" role="tab" id="tab-journal" class="tab" aria-selected="false" data-mode="journal">
+          Журнал → специальности
         </button>
       </div>
 
       <label class="field">
-        <span class="field-label" id="search-label">Журнал</span>
-        <input type="search" id="search" class="input" placeholder="Название, ISSN или № в перечне" autocomplete="off" spellcheck="false">
+        <span class="field-label" id="search-label">Специальность</span>
+        <input type="search" id="search" class="input" placeholder="Код или название специальности" autocomplete="off" spellcheck="false">
       </label>
 
       <div class="filter-row">
@@ -73,7 +104,15 @@
     </section>
 
     <section class="empty card" id="empty-state">
-      <p>Начните вводить название журнала, код специальности (например <code>5.6.4.</code> или <code>10.01.02</code>) или ISSN.</p>
+      <p>Начните вводить название журнала, код научной специальности (например <code>5.6.4.</code> или <code>10.01.02</code>) или ISSN.</p>
+    </section>
+
+    <section class="popular card" aria-labelledby="popular-title">
+      <h2 id="popular-title">Популярные специальности</h2>
+      <p class="popular-intro">
+        Частые запросы Wordstat: журналы ВАК по специальностям, паспорта специальностей, экономика, менеджмент, педагогика, право, системный анализ.
+      </p>
+      <div class="popular-grid" id="popular-specialties"></div>
     </section>
   </main>
 

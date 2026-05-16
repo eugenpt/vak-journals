@@ -88,6 +88,8 @@ python -m http.server 8080
 
 Сайт: **https://eugenpt.github.io/vak-journals/**
 
+`python build.py` также обновляет `docs/sitemap.xml`. Пока сайт остаётся single-page app, sitemap содержит только главную страницу: query-ссылки на журналы и специальности не добавляются, чтобы не рекламировать поисковикам тысячи URL с одним и тем же исходным HTML. `robots.txt` уже указывает поисковикам на этот sitemap.
+
 ### Белый список РЦНИ
 
 В карточке журнала сайт делает live-запрос к Cloudflare Worker:
