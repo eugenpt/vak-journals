@@ -33,9 +33,13 @@ HEADER_MARKERS = (
 )
 
 
+# Form feed is stripped by str.splitlines(); use a line marker instead.
+PAGE_BREAK = "\n<<<PDF_PAGE>>>\n"
+
+
 def extract_full_text(pdf_path: Path) -> str:
     reader = PdfReader(str(pdf_path))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
+    return PAGE_BREAK.join(page.extract_text() or "" for page in reader.pages)
 
 
 def is_header_line(line: str) -> bool:
