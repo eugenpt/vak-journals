@@ -276,6 +276,11 @@ body {
   color: var(--warn);
 }
 
+.dates .unreliable {
+  border-bottom: 1px dotted currentColor;
+  cursor: help;
+}
+
 .dates .muted {
   color: var(--muted);
 }

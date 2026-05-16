@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,17 +16,25 @@ from openpyxl.utils import get_column_letter
 from config import AS_OF_LABEL, STRUCTURED_XLSX, pdf_path_for_parsing
 from extract_journals import ISSN_RE, extract_full_text, normalize_issn, parse_entry, split_entries
 
-DATE_LINE = re.compile(r"^([сС]|по)\s+(\d{2}\.\d{2}\.\d{4})$")
+DATE_LINE = re.compile(r"^([сcСC]|по|до)\s+(\d{2}\.\d{2}\.\d{4})$")
+QUESTIONABLE_DATE_LINE = re.compile(
+    r"^(?:(?P<kind>[сcСC]|по|до)\s+)?(?P<value>\d{1,2}\.[\d.]+)$"
+)
 SPEC_START = re.compile(
     r"^("
     r"(?P<diss>\d{2}\.\d{2}\.\d{2})\s*[–—\-]\s*"
-    r"|(?P<vak>\d{1,2}\.\d{1,2}\.\d{1,2})\.?\s*"
+    r"|(?P<vak>\d{1,2}\.\d{1,2}\.\d{1,2})\.?\s*(?!\d)"
     r")"
 )
-BRANCH_RE = re.compile(r"\(([^)]+)\)\s*$")
+BRANCH_RE = re.compile(r"\(([^()]*)\)\s*$")
+BRANCH_SPLIT_RE = re.compile(r"\(([^()]*)\)\s*(наук[аи])\s*$", re.IGNORECASE)
+INLINE_DATE_RE = re.compile(r"\s*(?:[сcСC]|по|до)?\s*\d{1,2}\.[\d.]{5,}\s*")
+TRAILING_DATE_JUNK_AFTER_BRANCH = re.compile(
+    r"(\))\s*,?\s*(?:[сcСC]|до)?\s*\d{1,2}\.\d{1,3}\.?\d{0,4}\s*$"
+)
 # Split when a new specialty code appears mid-line (after ISSN / rename notes)
 EMBEDDED_SPEC = re.compile(
-    r"(?=(?:\d{1,2}\.\d{1,2}\.\d{1,2}\.?\s*)|(?:\d{2}\.\d{2}\.\d{2}\s*[–—\-]\s))"
+    r"(?=(?:\d{1,2}\.\d{1,2}\.\d{1,2}\.?\s*(?!\d))|(?:\d{2}\.\d{2}\.\d{2}\s*[–—\-]\s))"
 )
 ISSN_INLINE = re.compile(r"[,;\s]*ISSN\s+[\dXxХх\-–—\s,\)»«\"]+", re.IGNORECASE)
 BRANCH_CONT = re.compile(r"^\([^)]+\)\s*,?\s*$")
@@ -42,6 +50,9 @@ class SpecRecord:
     date_from: str = ""
     date_to: str = ""
     dates_raw: str = ""
+    date_from_unreliable: bool = False
+    date_to_unreliable: bool = False
+    date_notes: str = ""
     group_index: int = 0
 
 
@@ -61,25 +72,206 @@ def parse_dates_list(date_strs: list[str]) -> tuple[str, str, str]:
         kind, val = d.split(" ", 1)
         if kind in ("с", "С"):
             froms.append(val)
-        elif kind == "по":
+        elif kind in ("по", "до"):
             tos.append(val)
     return froms[0] if froms else "", tos[-1] if tos else "", "; ".join(date_strs)
 
 
+def possible_two_digit_values(part: str, low: int, high: int) -> list[str]:
+    if len(part) == 2:
+        val = int(part)
+        return [part] if low <= val <= high else []
+    if len(part) != 1:
+        return []
+    values: set[str] = set()
+    for digit in "0123456789":
+        for candidate in (part + digit, digit + part):
+            val = int(candidate)
+            if low <= val <= high:
+                values.add(candidate)
+    return sorted(values)
+
+
+def parse_date_line(line: str) -> tuple[str, str] | None:
+    """Return normalized date text and optional uncertainty note."""
+    s = line.strip()
+    dm = DATE_LINE.match(s)
+    if dm:
+        kind = "с" if dm.group(1) in ("с", "c", "С", "C") else dm.group(1)
+        if kind == "до":
+            kind = "по"
+        return f"{kind} {dm.group(2)}", ""
+
+    qm = QUESTIONABLE_DATE_LINE.match(s)
+    if not qm:
+        return None
+    raw_kind = qm.group("kind")
+    kind = "с" if raw_kind in (None, "с", "c", "С", "C") else raw_kind
+    if kind == "до":
+        kind = "по"
+    value = qm.group("value")
+    parts = value.split(".")
+    if len(parts) == 2 and len(parts[1]) == 6:
+        day_part, month_part, year = parts[0], parts[1][:2], parts[1][2:]
+    elif len(parts) == 3 and len(parts[1] + parts[2]) == 6:
+        day_part, month_part, year = parts[0], (parts[1] + parts[2])[:2], (parts[1] + parts[2])[2:]
+    elif len(parts) == 3:
+        day_part, month_part, year = parts
+    else:
+        return None
+    days = possible_two_digit_values(day_part, 1, 31)
+    months = possible_two_digit_values(month_part, 1, 12)
+    if not days or not months or len(year) != 4:
+        return None
+    candidates = [
+        (year, month, day, f"{day}.{month}.{year}")
+        for day in days
+        for month in months
+    ]
+    chosen = max(candidates) if kind == "с" else min(candidates)
+    normalized = f"{kind} {chosen[3]}"
+    reason = "отсутствует префикс даты" if raw_kind is None else "сомнительная дата в PDF"
+    note = f"{reason}: {s}; использовано {normalized}"
+    return normalized, note
+
+
 def extract_branch(title: str) -> tuple[str, str]:
-    title = title.strip(" ,")
+    title = title.strip(" ,;.")
+    title = TRAILING_DATE_JUNK_AFTER_BRANCH.sub(r"\1", title)
+    while title.endswith(")") and title.count(")") > title.count("("):
+        title = title[:-1].strip(" ,")
+    if title.count("(") > title.count(")"):
+        title += ")" * (title.count("(") - title.count(")"))
+    if (
+        "Экономика и управление народным хозяйством" in title
+        and "(по отраслям" in title
+        and title.endswith("(экономические науки))")
+    ):
+        core = title[: -len("(экономические науки))")].strip(" ,;")
+        if core.count("(") > core.count(")"):
+            core += ")"
+        return clean_spec_title(core), "экономические науки"
     m = BRANCH_RE.search(title)
     if not m:
+        split = split_branch_suffix(title)
+        if split:
+            core, branch = split
+            return clean_spec_title(core), branch
         return clean_spec_title(title), ""
     core = clean_spec_title(title[: m.start()].strip(" ,"))
-    return core, m.group(1).strip()
+    branch = normalize_branch(m.group(1))
+    if branch == "военные науки":
+        return core, branch
+    if branch == "государственно-правовые":
+        return clean_spec_title(f"{core} (государственно-правовые) науки"), "юридические науки"
+    return core, branch
 
 
 def clean_spec_title(title: str) -> str:
     """Remove ISSN / rename-note debris often injected by PDF line breaks."""
     t = ISSN_INLINE.sub("", title)
-    t = re.sub(r"\s+", " ", t).strip(" ,;")
+    t = re.sub(r"\s+", " ", t).strip(" ,;.-–—")
+    if t.count("(") > t.count(")"):
+        t += ")" * (t.count("(") - t.count(")"))
+    if t:
+        t = t[0].upper() + t[1:]
     return t
+
+
+def normalize_branch(branch: str) -> str:
+    """Normalize clear OCR/spacing variants in branch names."""
+    b = re.sub(r"\s+", " ", branch).strip(" ,;.")
+    b = b.replace(" - ", "-").replace("- ", "-").replace(" -", "-")
+    fixes = {
+        "Фармацевтические науки": "фармацевтические науки",
+        "биологические  науки": "биологические науки",
+        "географические  науки": "географические науки",
+        "геолого- минералогические": "геолого-минералогические",
+        "геолого-минералогические": "геолого-минералогические науки",
+        "геолого- минералогические науки": "геолого-минералогические науки",
+        "геолого- минералогические науки,": "геолого-минералогические науки",
+        "культурология науки": "культурология",
+        "медицинские  науки": "медицинские науки",
+        "медицинские е науки": "медицинские науки",
+        "психологические": "психологические науки",
+        "социологические  науки": "социологические науки",
+        "технически науки": "технические науки",
+        "технические науки,": "технические науки",
+        "технические системы": "технические науки",
+        "техническиенауки": "технические науки",
+        "фармацевтические": "фармацевтические науки",
+        "физико- математические": "физико-математические",
+        "физико-математические": "физико-математические науки",
+        "физико- математические науки": "физико-математические науки",
+        "юридические науки,": "юридические науки",
+        "биологические": "биологические науки",
+        "ветеринарные": "ветеринарные науки",
+        "географические": "географические науки",
+        "исторические": "исторические науки",
+        "медицинские": "медицинские науки",
+        "педагогические": "педагогические науки",
+        "политические": "политические науки",
+        "сельскохозяйственные": "сельскохозяйственные науки",
+        "социологические": "социологические науки",
+        "технические": "технические науки",
+        "филологические": "филологические науки",
+        "филологические наук": "филологические науки",
+        "философские": "философские науки",
+        "химические": "химические науки",
+        "экономические": "экономические науки",
+        "юридические": "юридические науки",
+    }
+    return fixes.get(b, b)
+
+
+BRANCH_SUFFIXES = sorted(
+    {
+        "архитектура",
+        "биологические науки",
+        "ветеринарные науки",
+        "военные науки",
+        "географические науки",
+        "геолого-минералогические науки",
+        "искусствоведение",
+        "исторические науки",
+        "культурология",
+        "медицинские науки",
+        "педагогические науки",
+        "политические науки",
+        "психологические науки",
+        "сельскохозяйственные науки",
+        "социологические науки",
+        "теология",
+        "технические науки",
+        "фармацевтические науки",
+        "физико-математические науки",
+        "филологические науки",
+        "философские науки",
+        "химические науки",
+        "экономические науки",
+        "юридические науки",
+    },
+    key=len,
+    reverse=True,
+)
+
+
+def split_branch_suffix(title: str) -> tuple[str, str] | None:
+    """Handle branch suffixes whose closing parenthesis or opening parenthesis was lost."""
+    t = INLINE_DATE_RE.sub(" ", title).strip(" ,;.")
+    for branch in BRANCH_SUFFIXES:
+        if t.lower() == branch:
+            return t, branch
+    m = BRANCH_SPLIT_RE.search(t)
+    if m:
+        branch = normalize_branch(f"{m.group(1)} {m.group(2)}")
+        return t[: m.start()].strip(" ,;"), branch
+
+    normalized_tail = re.sub(r"\s+", " ", t)
+    for branch in BRANCH_SUFFIXES:
+        if normalized_tail.lower().endswith(" " + branch):
+            return normalized_tail[: -len(branch)].strip(" ,;("), branch
+    return None
 
 
 def is_issn_junk_line(line: str) -> bool:
@@ -197,7 +389,7 @@ def has_branch_in_title(title: str) -> bool:
 def is_branch_continuation_line(line: str) -> bool:
     """Title fragment continuing previous specialty cell (often after page break)."""
     s = line.strip()
-    if not s or SPEC_START.match(s) or DATE_LINE.match(s):
+    if not s or SPEC_START.match(s) or parse_date_line(s):
         return False
     return bool(BRANCH_CONT.match(s)) or (
         s.startswith("(") and ")" in s and not EMBEDDED_SPEC.search(s)
@@ -215,10 +407,9 @@ def page_leading_dates(page_lines: list[str]) -> list[str] | None:
             continue
         if ENTRY_START.match(s):
             return None
-        dm = DATE_LINE.match(s)
-        if dm:
-            kind = "с" if dm.group(1) in ("с", "С") else dm.group(1)
-            batch.append(f"{kind} {dm.group(2)}")
+        parsed = parse_date_line(s)
+        if parsed:
+            batch.append(parsed[0])
             continue
         if batch:
             break
@@ -238,15 +429,23 @@ def apply_page_start(
     segment_dates: list[str],
     split_row_continue: bool,
     pending_leading_dates: list[str] | None,
+    pending_leading_date_notes: dict[str, str],
     ended_mid_row: bool,
-) -> tuple[dict | None, list[str], bool, list[str] | None, int]:
+) -> tuple[dict | None, list[str], bool, list[str] | None, dict[str, str], int]:
     """
     Apply table rules at a page boundary. Returns
-    (current, segment_dates, split_row_continue, pending_leading_dates, skip_lines).
+    (current, segment_dates, split_row_continue, pending dates, pending notes, skip_lines).
     """
     skip = 0
     if not page_lines:
-        return current, segment_dates, split_row_continue, pending_leading_dates, skip
+        return (
+            current,
+            segment_dates,
+            split_row_continue,
+            pending_leading_dates,
+            pending_leading_date_notes,
+            skip,
+        )
 
     leading = page_leading_dates(page_lines)
     if leading is not None:
@@ -257,32 +456,77 @@ def apply_page_start(
                 if consumed:
                     break
                 continue
-            if DATE_LINE.match(s):
+            if parse_date_line(s):
                 consumed += 1
                 continue
             break
-        return current, segment_dates, False, leading, consumed
+        notes = {}
+        for line in page_lines[:consumed]:
+            normalized, note = parse_date_line(line.strip()) or ("", "")
+            if note:
+                notes[normalized] = note
+        return current, segment_dates, False, leading, notes, consumed
 
     if not ended_mid_row:
-        return current, segment_dates, False, pending_leading_dates, skip
+        return (
+            current,
+            segment_dates,
+            False,
+            pending_leading_dates,
+            pending_leading_date_notes,
+            skip,
+        )
 
-    # No date in the first row of the date column → row continues from previous page.
-    split_row_continue = True
     idx = 0
     while idx < len(page_lines) and not page_lines[idx].strip():
         idx += 1
     if idx >= len(page_lines):
-        return current, segment_dates, split_row_continue, pending_leading_dates, skip
+        return (
+            current,
+            segment_dates,
+            split_row_continue,
+            pending_leading_dates,
+            pending_leading_date_notes,
+            skip,
+        )
 
     first = page_lines[idx].strip()
+    if SPEC_START.match(first):
+        if any(parse_date_line(line.strip()) for line in page_lines):
+            return (
+                current,
+                segment_dates,
+                False,
+                pending_leading_dates,
+                pending_leading_date_notes,
+                skip,
+            )
+
+    # No date in the first row of the date column and no clean new specialty:
+    # the row continues from the previous page (branch/ISSN/title fragments).
+    split_row_continue = True
     if is_branch_continuation_line(first) and current_specs:
         target = current if current is not None else current_specs[-1]
         target["title"] = (target["title"] + " " + first).strip()
         if current is None:
             current = target
-        return current, segment_dates, split_row_continue, pending_leading_dates, idx + 1
+        return (
+            current,
+            segment_dates,
+            split_row_continue,
+            pending_leading_dates,
+            pending_leading_date_notes,
+            idx + 1,
+        )
 
-    return current, segment_dates, split_row_continue, pending_leading_dates, skip
+    return (
+        current,
+        segment_dates,
+        split_row_continue,
+        pending_leading_dates,
+        pending_leading_date_notes,
+        skip,
+    )
 
 
 def date_ahead_differs_from_segment(
@@ -292,10 +536,9 @@ def date_ahead_differs_from_segment(
         s = raw_lines[j].strip()
         if not s:
             continue
-        dm = DATE_LINE.match(s)
-        if dm:
-            kind = "с" if dm.group(1) in ("с", "С") else dm.group(1)
-            upcoming = f"{kind} {dm.group(2)}"
+        parsed = parse_date_line(s)
+        if parsed:
+            upcoming = parsed[0]
             return upcoming not in segment_dates
     return False
 
@@ -306,7 +549,7 @@ def spec_has_trailing_date_ahead(raw_lines: list[str], start: int) -> bool:
         line = raw_lines[j].strip()
         if not line:
             continue
-        if DATE_LINE.match(line):
+        if parse_date_line(line):
             return True
         for part in expand_spec_lines([line]):
             if is_issn_junk_line(part):
@@ -378,22 +621,25 @@ def parse_specs_segmented(after_issn: str) -> tuple[list[SpecRecord], str]:
     for chunk in page_chunks:
         raw_pages.append([l.strip() for l in chunk.splitlines() if l.strip()])
 
-    segments: list[tuple[list[dict], list[str]]] = []
+    segments: list[tuple[list[dict], list[str], dict[str, str]]] = []
     current_specs: list[dict] = []
     segment_dates: list[str] = []
+    segment_date_notes: dict[str, str] = {}
     current: dict | None = None
     notes: list[str] = []
     split_row_active = False
     split_row_continue = False
     pending_leading_dates: list[str] | None = None
+    pending_leading_date_notes: dict[str, str] = {}
     specs_on_page_since_break = 0
 
     def close_segment():
-        nonlocal current_specs, segment_dates, split_row_continue
+        nonlocal current_specs, segment_dates, segment_date_notes, split_row_continue
         if current_specs:
-            segments.append((current_specs, list(segment_dates)))
+            segments.append((current_specs, list(segment_dates), dict(segment_date_notes)))
         current_specs = []
         segment_dates = []
+        segment_date_notes = {}
         split_row_continue = False
 
     def page_end_split_row(page_i: int, line_i: int) -> bool:
@@ -402,8 +648,13 @@ def parse_specs_segmented(after_issn: str) -> tuple[list[SpecRecord], str]:
         next_page = raw_pages[page_i + 1]
         if page_start_has_date(next_page):
             return False
+        first_next = next((ln.strip() for ln in next_page if ln.strip()), "")
+        if SPEC_START.match(first_next) and any(
+            parse_date_line(line.strip()) for line in next_page
+        ):
+            return False
         rest = raw_page[line_i:]
-        if rest and not all(not ln.strip() or DATE_LINE.match(ln.strip()) for ln in rest):
+        if rest and not all(not ln.strip() or parse_date_line(ln.strip()) for ln in rest):
             return False
         return peek_raw_has_spec_ahead(next_page, 0) or any(
             is_branch_continuation_line(ln)
@@ -412,33 +663,43 @@ def parse_specs_segmented(after_issn: str) -> tuple[list[SpecRecord], str]:
         )
 
     def handle_date_batch(
-        batch: list[str], raw_page: list[str], line_i: int, page_i: int
+        batch: list[str],
+        batch_notes: dict[str, str],
+        raw_page: list[str],
+        line_i: int,
+        page_i: int,
     ) -> None:
-        nonlocal segment_dates, split_row_active, split_row_continue, pending_leading_dates, current
+        nonlocal segment_dates, segment_date_notes, split_row_active, split_row_continue
+        nonlocal pending_leading_dates, pending_leading_date_notes, current
         tail = expand_spec_lines(raw_page[line_i:])
         tail_raw = raw_page[line_i:]
         if current is not None and current_specs and not has_branch_in_title(
             current["title"]
         ):
             segment_dates = batch
+            segment_date_notes = dict(batch_notes)
             split_row_active = True
             split_row_continue = True
         elif current is not None and current_specs and has_branch_in_title(
             current["title"]
         ):
             segment_dates = batch
+            segment_date_notes = dict(batch_notes)
             current = None
             split_row_active = False
         elif is_split_row_date(current_specs, tail, 0, tail_raw, 0):
             segment_dates = batch
+            segment_date_notes = dict(batch_notes)
             split_row_active = True
             split_row_continue = True
         elif dates_apply_to_following(batch, current_specs, tail, 0, tail_raw, 0):
             close_segment()
             pending_leading_dates = batch
+            pending_leading_date_notes = dict(batch_notes)
             split_row_active = False
         else:
             segment_dates = batch
+            segment_date_notes = dict(batch_notes)
             split_row_active = False
         if page_end_split_row(page_i, line_i):
             split_row_active = True
@@ -454,6 +715,7 @@ def parse_specs_segmented(after_issn: str) -> tuple[list[SpecRecord], str]:
                 segment_dates,
                 split_row_continue,
                 pending_leading_dates,
+                pending_leading_date_notes,
                 skip,
             ) = apply_page_start(
                 raw_page,
@@ -462,6 +724,7 @@ def parse_specs_segmented(after_issn: str) -> tuple[list[SpecRecord], str]:
                 segment_dates=segment_dates,
                 split_row_continue=split_row_continue,
                 pending_leading_dates=pending_leading_dates,
+                pending_leading_date_notes=pending_leading_date_notes,
                 ended_mid_row=ended_mid_row,
             )
             if split_row_continue and segment_dates:
@@ -470,23 +733,26 @@ def parse_specs_segmented(after_issn: str) -> tuple[list[SpecRecord], str]:
         raw_i = skip
         while raw_i < len(raw_page):
             raw_line = raw_page[raw_i]
+            if parse_date_line(raw_line.strip()):
+                batch: list[str] = []
+                batch_notes: dict[str, str] = {}
+                batch_end = raw_i
+                while batch_end < len(raw_page):
+                    parsed = parse_date_line(raw_page[batch_end].strip())
+                    if not parsed:
+                        break
+                    normalized, note = parsed
+                    batch.append(normalized)
+                    if note:
+                        batch_notes[normalized] = note
+                    batch_end += 1
+                handle_date_batch(batch, batch_notes, raw_page, batch_end, page_i)
+                raw_i = batch_end
+                continue
+
             parts = expand_spec_lines([raw_line]) if raw_line.strip() else []
             if not parts:
                 raw_i += 1
-                continue
-
-            if DATE_LINE.match(raw_line.strip()):
-                batch: list[str] = []
-                batch_end = raw_i
-                while batch_end < len(raw_page) and DATE_LINE.match(
-                    raw_page[batch_end].strip()
-                ):
-                    dm2 = DATE_LINE.match(raw_page[batch_end].strip())
-                    kind = "с" if dm2.group(1) in ("с", "С") else dm2.group(1)
-                    batch.append(f"{kind} {dm2.group(2)}")
-                    batch_end += 1
-                handle_date_batch(batch, raw_page, batch_end, page_i)
-                raw_i = batch_end
                 continue
 
             for line in parts:
@@ -496,7 +762,9 @@ def parse_specs_segmented(after_issn: str) -> tuple[list[SpecRecord], str]:
                         if current_specs and segment_dates:
                             close_segment()
                         segment_dates = list(pending_leading_dates)
+                        segment_date_notes = dict(pending_leading_date_notes)
                         pending_leading_dates = None
+                        pending_leading_date_notes = {}
                         split_row_active = False
                         split_row_continue = False
                     elif current_specs and segment_dates:
@@ -535,38 +803,49 @@ def parse_specs_segmented(after_issn: str) -> tuple[list[SpecRecord], str]:
                 if current is not None:
                     current["title"] = (current["title"] + " " + line).strip()
                 elif not is_issn_junk_line(line):
-                    notes.append(f"orphan_text:{line[:40]}")
+                    notes.append(f"orphan_text:{line}")
             raw_i += 1
 
     if current_specs:
         close_segment()
 
     records: list[SpecRecord] = []
-    for gi, (specs, dates) in enumerate(segments):
+    for gi, (specs, dates, date_notes) in enumerate(segments):
         d_from, d_to, d_raw = parse_dates_list(dates)
+        from_note = date_notes.get(f"с {d_from}", "") if d_from else ""
+        to_note = date_notes.get(f"по {d_to}", "") if d_to else ""
         for s in specs:
-            title, branch = extract_branch(s["title"])
+            raw_title = s["title"]
             inline = [
-                f"{'с' if k in ('с', 'С') else k} {v}"
-                for k, v in re.findall(r"\b([сС]|по)\s+(\d{2}\.\d{2}\.\d{4})\b", title)
+                f"{'с' if k in ('с', 'c', 'С', 'C') else ('по' if k == 'до' else k)} {v}"
+                for k, v in re.findall(
+                    r"\b([сcСC]|по|до)\s+(\d{1,2}\.\d{1,2}\.\d{3,4})\b",
+                    raw_title,
+                )
             ]
             if inline:
-                title = re.sub(r"\s*([сС]|по)\s+\d{2}\.\d{2}\.\d{4}\s*", " ", title).strip()
                 id_from, id_to, id_raw = parse_dates_list(inline)
                 d_from, d_to = d_from or id_from, d_to or id_to
                 d_raw = "; ".join(x for x in (d_raw, id_raw) if x)
-            records.append(
-                SpecRecord(
-                    code=s["code"],
-                    code_type=s["code_type"],
-                    title=title,
-                    branch=branch,
-                    date_from=d_from,
-                    date_to=d_to,
-                    dates_raw=d_raw,
-                    group_index=gi,
+            title, branch = extract_branch(INLINE_DATE_RE.sub(" ", raw_title).strip())
+            note_text = "; ".join(x for x in (from_note, to_note) if x)
+            branches = [normalize_branch(b) for b in branch.split(",")] if branch else [""]
+            for branch_part in [b.strip() for b in branches if b.strip() or not branch]:
+                records.append(
+                    SpecRecord(
+                        code=s["code"],
+                        code_type=s["code_type"],
+                        title=title,
+                        branch=branch_part,
+                        date_from=d_from,
+                        date_to=d_to,
+                        dates_raw=d_raw,
+                        date_from_unreliable=bool(from_note),
+                        date_to_unreliable=bool(to_note),
+                        date_notes=note_text,
+                        group_index=gi,
+                    )
                 )
-            )
     return records, "; ".join(notes)
 
 
@@ -607,10 +886,17 @@ def parse_journal(num: int, block: str, journal_row: dict) -> JournalSpecs:
                 issn = normalize_issn(m)
                 break
     specs, notes = parse_specs_segmented(after)
+    name = journal_row["name"]
+    note_parts = [p for p in notes.split("; ") if p]
+    title_continuation = " ".join(
+        p.removeprefix("orphan_text:") for p in note_parts if p.startswith("orphan_text:")
+    )
+    if num == 3 and title_continuation:
+        name = re.sub(r"\s+", " ", f"{name} {title_continuation}").strip()
     fill_missing_spec_dates(specs, journal_row.get("dates", ""))
     return JournalSpecs(
         num=num,
-        name=journal_row["name"],
+        name=name,
         issn=issn,
         journal_dates=journal_row.get("dates", ""),
         specs=specs,
@@ -618,12 +904,96 @@ def parse_journal(num: int, block: str, journal_row: dict) -> JournalSpecs:
     )
 
 
+def edit_distance_at_most_one(a: str, b: str) -> bool:
+    if a == b:
+        return False
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        return sum(ca != cb for ca, cb in zip(a, b)) == 1
+
+    if len(a) > len(b):
+        a, b = b, a
+    i = j = edits = 0
+    while i < len(a) and j < len(b):
+        if a[i] == b[j]:
+            i += 1
+            j += 1
+            continue
+        edits += 1
+        if edits > 1:
+            return False
+        j += 1
+    return True
+
+
+def canonicalize_specialty_titles(journals: list[JournalSpecs]) -> None:
+    """Merge one-edit title variants within the same code and branch."""
+    counts: Counter[tuple[str, str, str, str]] = Counter()
+    grouped: dict[tuple[str, str, str], set[str]] = defaultdict(set)
+    for journal in journals:
+        for spec in journal.specs:
+            k = (spec.code_type, spec.code, spec.branch, spec.title)
+            counts[k] += 1
+            grouped[(spec.code_type, spec.code, spec.branch)].add(spec.title)
+
+    canonical: dict[tuple[str, str, str, str], str] = {}
+    for (code_type, code, branch), titles_set in grouped.items():
+        titles = sorted(titles_set)
+        parent = {title: title for title in titles}
+
+        def find(x: str) -> str:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: str, b: str) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        for i, left in enumerate(titles):
+            for right in titles[i + 1 :]:
+                if edit_distance_at_most_one(left, right):
+                    union(left, right)
+
+        components: dict[str, list[str]] = defaultdict(list)
+        for title in titles:
+            components[find(title)].append(title)
+
+        for component in components.values():
+            if len(component) < 2:
+                continue
+            best = max(
+                component,
+                key=lambda title: (
+                    counts[(code_type, code, branch, title)],
+                    -title.count("-"),
+                    -title.count(" "),
+                    len(title),
+                    title,
+                ),
+            )
+            for title in component:
+                canonical[(code_type, code, branch, title)] = best
+
+    for journal in journals:
+        for spec in journal.specs:
+            spec.title = canonical.get(
+                (spec.code_type, spec.code, spec.branch, spec.title), spec.title
+            )
+
+
 def parse_all(pdf_path: Path) -> list[JournalSpecs]:
     blocks = dict(split_entries(extract_full_text(pdf_path)))
-    return [
+    journals = [
         parse_journal(num, blocks[num], parse_entry(num, blocks[num]))
         for num in sorted(blocks)
     ]
+    canonicalize_specialty_titles(journals)
+    return journals
+
 
 
 def write_xlsx(journals: list[JournalSpecs], out_path: Path) -> dict:
@@ -663,6 +1033,9 @@ def write_xlsx(journals: list[JournalSpecs], out_path: Path) -> dict:
                     "date_from": s.date_from,
                     "date_to": s.date_to,
                     "dates_raw": s.dates_raw,
+                    "date_from_unreliable": s.date_from_unreliable,
+                    "date_to_unreliable": s.date_to_unreliable,
+                    "date_notes": s.date_notes,
                     "journal_dates_all": j.journal_dates,
                 }
             )
@@ -706,13 +1079,13 @@ def write_xlsx(journals: list[JournalSpecs], out_path: Path) -> dict:
         [
             "journal_num", "journal_name", "issn", "spec_id", "code_type", "code",
             "title", "branch", "group_index", "date_from", "date_to", "dates_raw",
-            "journal_dates_all",
+            "date_from_unreliable", "date_to_unreliable", "date_notes", "journal_dates_all",
         ]
     )
     for r in mapping_rows:
         ws_m.append(list(r.values()))
     style_header(ws_m)
-    autosize(ws_m, [8, 42, 14, 8, 10, 12, 45, 25, 8, 12, 12, 28, 28])
+    autosize(ws_m, [8, 42, 14, 8, 10, 12, 45, 25, 8, 12, 12, 28, 10, 10, 42, 28])
     ws_m.freeze_panes = "A2"
 
     ws_p = wb.create_sheet("Parse_Summary")

@@ -51,8 +51,17 @@
 
   function formatDates(link) {
     const parts = [];
-    if (link.from) parts.push(`<span class="from">с ${escapeHtml(link.from)}</span>`);
-    if (link.to) parts.push(`<span class="to">по ${escapeHtml(link.to)}</span>`);
+    const note = link.date_notes ? ` title="${escapeHtml(link.date_notes)}"` : "";
+    const fromClass = link.from_unreliable ? "from unreliable" : "from";
+    const toClass = link.to_unreliable ? "to unreliable" : "to";
+    if (link.from) {
+      const mark = link.from_unreliable ? " (?)" : "";
+      parts.push(`<span class="${fromClass}"${note}>с ${escapeHtml(link.from)}${mark}</span>`);
+    }
+    if (link.to) {
+      const mark = link.to_unreliable ? " (?)" : "";
+      parts.push(`<span class="${toClass}"${note}>по ${escapeHtml(link.to)}${mark}</span>`);
+    }
     if (!parts.length) return '<span class="muted">даты не указаны</span>';
     return parts.join(" · ");
   }

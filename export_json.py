@@ -47,17 +47,22 @@ def build_payload(journals: list[JournalSpecs]) -> dict:
                         "search": search,
                     }
                 )
-            links.append(
-                {
-                    "j": j.num,
-                    "s": catalog[k],
-                    "from": s.date_from or None,
-                    "to": s.date_to or None,
-                    "from_iso": ru_to_iso(s.date_from),
-                    "to_iso": ru_to_iso(s.date_to),
-                    "g": s.group_index,
-                }
-            )
+            link = {
+                "j": j.num,
+                "s": catalog[k],
+                "from": s.date_from or None,
+                "to": s.date_to or None,
+                "from_iso": ru_to_iso(s.date_from),
+                "to_iso": ru_to_iso(s.date_to),
+                "g": s.group_index,
+            }
+            if s.date_from_unreliable:
+                link["from_unreliable"] = True
+            if s.date_to_unreliable:
+                link["to_unreliable"] = True
+            if s.date_notes:
+                link["date_notes"] = s.date_notes
+            links.append(link)
 
     journal_rows = []
     for j in journals:
