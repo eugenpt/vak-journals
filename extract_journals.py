@@ -15,7 +15,7 @@ from pypdf import PdfReader
 from config import AS_OF_LABEL, JOURNALS_XLSX, PDF_PATH, pdf_path_for_parsing
 
 ENTRY_START = re.compile(r"^(\d{1,4})\.\s+(?!\d)")
-ISSN_RE = re.compile(r"\b(\d{4})[\s\-–—]+(\d{3}[\dXxХх])\b")
+ISSN_RE = re.compile(r"\b(\d{3,4})[\s\-–—]+(\d{3}[\dXxХх])\b")
 DATE_RE = re.compile(r"\b((?:с|по)\s+\d{2}\.\d{2}\.\d{4})\b", re.IGNORECASE)
 SPEC_LINE = re.compile(
     r"^("
@@ -74,8 +74,11 @@ def split_entries(text: str) -> list[tuple[int, str]]:
 
 
 def normalize_issn(match: re.Match) -> str:
+    prefix = match.group(1)
+    if len(prefix) == 3:
+        prefix = prefix[0] + prefix
     suffix = match.group(2).replace("Х", "X").replace("х", "x")
-    return f"{match.group(1)}-{suffix}"
+    return f"{prefix}-{suffix}"
 
 
 def parse_entry(num: int, block: str) -> dict:

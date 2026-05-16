@@ -170,6 +170,12 @@ def extract_branch(title: str) -> tuple[str, str]:
 def clean_spec_title(title: str) -> str:
     """Remove ISSN / rename-note debris often injected by PDF line breaks."""
     t = ISSN_INLINE.sub("", title)
+    t = re.sub(
+        r"\(\s*(?:до|До)\s+\d{2}\.\d{2}\.\d{4}.*?(?:ISSN\s+[\dXxХх\-–—\s]+)?\)",
+        " ",
+        t,
+    )
+    t = re.sub(r"\(\s*наименование в Перечне «[^»]+»\s*", " ", t)
     t = re.sub(r"\s+", " ", t).strip(" ,;.-–—")
     if t.count("(") > t.count(")"):
         t += ")" * (t.count("(") - t.count(")"))
@@ -283,6 +289,19 @@ def is_issn_junk_line(line: str) -> bool:
     rest = re.sub(r"ISSN\s*", "", line, flags=re.IGNORECASE)
     rest = re.sub(r"[\dXxХх\-–—\s,\)»«\"«]+", "", rest)
     return len(rest) < 2
+
+
+def is_rename_note_line(line: str) -> bool:
+    """Rename/title-note fragments that belong to the journal cell, not specialty text."""
+    s = line.strip()
+    if not s or SPEC_START.match(s) or parse_date_line(s):
+        return False
+    markers = (
+        "наименование",
+        "Перечне",
+        "ISSN",
+    )
+    return any(marker in s for marker in markers)
 
 
 def junk_before_next_spec(lines: list[str], start: int) -> bool:
@@ -491,6 +510,32 @@ def apply_page_start(
         )
 
     first = page_lines[idx].strip()
+    while (
+        idx < len(page_lines)
+        and is_rename_note_line(page_lines[idx])
+        and not peek_next_is_spec(expand_spec_lines([page_lines[idx]]), 0)
+    ):
+        idx += 1
+    if idx >= len(page_lines):
+        return (
+            current,
+            segment_dates,
+            split_row_continue,
+            pending_leading_dates,
+            pending_leading_date_notes,
+            skip,
+        )
+    if idx:
+        return (
+            current,
+            segment_dates,
+            True,
+            pending_leading_dates,
+            pending_leading_date_notes,
+            idx,
+        )
+
+    first = page_lines[idx].strip()
     if SPEC_START.match(first):
         if any(parse_date_line(line.strip()) for line in page_lines):
             return (
@@ -572,7 +617,7 @@ def expand_spec_lines(lines: list[str]) -> list[str]:
         else:
             parts = [line]
         for part in parts:
-            if not is_issn_junk_line(part):
+            if not is_issn_junk_line(part) and not is_rename_note_line(part):
                 out.append(part)
     return out
 
@@ -648,7 +693,18 @@ def parse_specs_segmented(after_issn: str) -> tuple[list[SpecRecord], str]:
         next_page = raw_pages[page_i + 1]
         if page_start_has_date(next_page):
             return False
-        first_next = next((ln.strip() for ln in next_page if ln.strip()), "")
+        first_next = next(
+            (
+                ln.strip()
+                for ln in next_page
+                if ln.strip()
+                and (
+                    not is_rename_note_line(ln)
+                    or peek_next_is_spec(expand_spec_lines([ln]), 0)
+                )
+            ),
+            "",
+        )
         if SPEC_START.match(first_next) and any(
             parse_date_line(line.strip()) for line in next_page
         ):
