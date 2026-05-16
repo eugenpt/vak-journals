@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+.venv-*/
+venv/
+.env
+
+# Downloaded PDF (fetch via script; do not commit)
+data/*.pdf
+
+# Generated outputs (rebuild with scripts)
+output/*
+!output/.gitkeep
+
+# Editor
+.idea/
+.vscode/
