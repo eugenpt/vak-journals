@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parent
 SOURCE_URL_FILE = ROOT / "SOURCE_URL.txt"
 EDITIONS_PAGE = "https://vak.gisnauka.ru/documents/editions"
 SITE_URL = "https://eugenpt.github.io/vak-journals/"
+PASSPORT_NEWS_API = "https://vak.gisnauka.ru/api/news/news-list/?page=1&pageSize=10&type=17"
 
 # As stated in the official PDF title (по состоянию на …)
 AS_OF_DATE = "10.04.2026"

@@ -18,7 +18,7 @@
   const rcsiProxyUrl = "https://vak-journals-proxy.eugen-pt.workers.dev/";
   const defaultTitle = "Перечень рецензируемых изданий ВАК — поиск";
   const defaultDescription =
-    "Поиск журналов ВАК для публикаций по кандидатским и докторским диссертациям: научные специальности, ISSN, даты включения и исключения из перечня.";
+    "Поиск журналов ВАК для публикаций по кандидатским и докторским диссертациям: научные специальности, паспорта специальностей, ISSN, даты включения и исключения из перечня.";
   const popularSpecCodes = [
     "5.2.3.",
     "2.3.1.",
@@ -421,6 +421,16 @@
     return rows.join("");
   }
 
+  function renderPassportLink(s) {
+    if (!s.passport || !s.passport.url) return "";
+    return `<div class="spec-tools">
+      <a class="primary-link" href="${escapeHtml(s.passport.url)}" target="_blank" rel="noopener">
+        Паспорт специальности ВАК
+      </a>
+      <span>${escapeHtml(s.passport.title || s.title)}</span>
+    </div>`;
+  }
+
   async function loadRcsiInfo(j, requestId) {
     const status = $("#rcsi-status");
     if (!status || !j.issn) return;
@@ -560,17 +570,18 @@
       .join(" · ");
     setPageMeta(
       `${s.code} ${s.title} — журналы ВАК`,
-      `Журналы из Перечня ВАК по специальности ${s.code} ${s.title}: ${links.length} журналов${iso ? ` на ${formatIsoRu(iso)}` : ""}.`
+      `Журналы из Перечня ВАК по специальности ${s.code} ${s.title}: ${links.length} журналов${s.passport ? ", есть ссылка на паспорт специальности" : ""}${iso ? ` на ${formatIsoRu(iso)}` : ""}.`
     );
 
     if (!links.length) {
       el.resultsBody.innerHTML =
-        "<p class=\"hint\">Нет журналов для выбранных условий.</p>";
+        `${renderPassportLink(s)}
+        <p class="hint">Нет журналов для выбранных условий.</p>`;
       return;
     }
 
     links.sort((a, b) => a.j - b.j);
-    let html = '<ul class="result-list">';
+    let html = `${renderPassportLink(s)}<ul class="result-list">`;
     for (const link of links) {
       const j = journalByNum.get(link.j);
       html += `<li class="result-item clickable">

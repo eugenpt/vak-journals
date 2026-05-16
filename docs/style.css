@@ -354,6 +354,27 @@ body {
   color: var(--accent);
 }
 
+.spec-tools {
+  margin: 1rem 0 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.spec-tools .primary-link {
+  display: inline-block;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.spec-tools span {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 .result-list {
   margin: 1rem 0 0;
   padding: 0;
