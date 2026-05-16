@@ -11,9 +11,11 @@
   let data = null;
   let mode = "journal";
   let journalSearch = null;
-  let specSearch = null;
   let selectedJournal = null;
   let selectedSpec = null;
+  const validModes = new Set(["journal", "spec"]);
+  const urlStateDebounceMs = 300;
+  let urlStateTimer = null;
 
   const el = {
     loading: $("#loading"),
@@ -74,6 +76,57 @@
       .replace(/"/g, "&quot;");
   }
 
+  function normalizeForMatch(s) {
+    return String(s || "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLocaleLowerCase("ru-RU");
+  }
+
+  function readUrlState() {
+    const params = new URLSearchParams(window.location.search);
+    const urlMode = params.get("mode");
+    return {
+      mode: validModes.has(urlMode) ? urlMode : "journal",
+      query: params.get("q") || "",
+      journal: Number(params.get("journal")) || null,
+      spec: Number(params.get("spec")) || null,
+    };
+  }
+
+  function writeUrlState() {
+    if (urlStateTimer) {
+      window.clearTimeout(urlStateTimer);
+      urlStateTimer = null;
+    }
+
+    const url = new URL(window.location.href);
+    url.searchParams.set("mode", mode);
+    const query = el.search.value.trim();
+    if (query) {
+      url.searchParams.set("q", query);
+    } else {
+      url.searchParams.delete("q");
+    }
+    url.searchParams.delete("journal");
+    url.searchParams.delete("spec");
+    if (mode === "journal" && selectedJournal != null) {
+      url.searchParams.set("journal", String(selectedJournal));
+    }
+    if (mode === "spec" && selectedSpec != null) {
+      url.searchParams.set("spec", String(selectedSpec));
+    }
+    window.history.replaceState({ mode, query }, "", url);
+  }
+
+  function debounceUrlState() {
+    if (urlStateTimer) window.clearTimeout(urlStateTimer);
+    urlStateTimer = window.setTimeout(() => {
+      urlStateTimer = null;
+      writeUrlState();
+    }, urlStateDebounceMs);
+  }
+
   function indexLinks() {
     for (const link of data.links) {
       if (!linksByJournal.has(link.j)) linksByJournal.set(link.j, []);
@@ -98,16 +151,10 @@
         search: j.search,
       }))
     );
-
-    specSearch = new MiniSearch({
-      fields: ["code", "title", "branch", "search"],
-      storeFields: ["id", "code", "title", "branch", "type"],
-      searchOptions: { prefix: true, fuzzy: 0.12, boost: { code: 3, title: 1.5 } },
-    });
-    specSearch.addAll(data.specialties);
   }
 
-  function setMode(next) {
+  function setMode(next, options = {}) {
+    const { syncUrl = true, focus = true } = options;
     mode = next;
     selectedJournal = null;
     selectedSpec = null;
@@ -125,7 +172,68 @@
     el.resultsPanel.hidden = true;
     el.emptyState.hidden = false;
     el.searchHint.textContent = "";
-    el.search.focus();
+    if (syncUrl) writeUrlState();
+    if (focus) el.search.focus();
+  }
+
+  function isNumericQuery(q) {
+    return /^[\d.\-\s]+$/.test(q.trim());
+  }
+
+  function specialtyHit(s) {
+    return {
+      id: s.id,
+      code: s.code,
+      title: s.title,
+      branch: s.branch,
+      type: s.type,
+    };
+  }
+
+  function searchSpecialties(q, limit = 12) {
+    const needle = q.trim();
+    const normalizedNeedle = normalizeForMatch(needle);
+
+    if (!isNumericQuery(q)) {
+      return data.specialties
+        .filter((s) => {
+          return normalizeForMatch([s.code, s.branch, s.title].filter(Boolean).join(" ")).includes(
+            normalizedNeedle
+          );
+        })
+        .sort((a, b) => a.code.localeCompare(b.code, "ru-RU", { numeric: true }))
+        .slice(0, limit)
+        .map(specialtyHit);
+    }
+
+    return data.specialties
+      .filter((s) => s.code.startsWith(needle))
+      .sort((a, b) => a.code.localeCompare(b.code, "ru-RU", { numeric: true }))
+      .slice(0, limit)
+      .map(specialtyHit);
+  }
+
+  function specialtyQuery(s) {
+    const branch = s.branch ? ` (${s.branch})` : "";
+    return `${s.code} ${s.title}${branch}`;
+  }
+
+  function specialtyUrl(s) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("mode", "spec");
+    url.searchParams.set("q", specialtyQuery(s));
+    url.searchParams.set("spec", String(s.id));
+    url.searchParams.delete("journal");
+    return url.href;
+  }
+
+  function journalUrl(j) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("mode", "journal");
+    url.searchParams.set("q", j.name);
+    url.searchParams.set("journal", String(j.n));
+    url.searchParams.delete("spec");
+    return url.href;
   }
 
   function runSearch(q) {
@@ -133,8 +241,9 @@
       el.suggestions.hidden = true;
       return;
     }
-    const ms = mode === "journal" ? journalSearch : specSearch;
-    const hits = ms.search(q, { limit: 12 });
+    const hits = mode === "journal"
+      ? journalSearch.search(q, { limit: 12 })
+      : searchSpecialties(q);
     if (!hits.length) {
       el.suggestions.hidden = true;
       el.searchHint.textContent = "Ничего не найдено. Уточните запрос.";
@@ -151,10 +260,10 @@
           </button></li>`;
         }
         const s = specById.get(h.id);
-        const branch = s.branch ? ` · ${escapeHtml(s.branch)}` : "";
+        const branch = s.branch ? `<strong class="branch">${escapeHtml(s.branch)}</strong>` : "";
         return `<li><button type="button" data-spec="${s.id}">
-            <strong class="code">${escapeHtml(s.code)}</strong> ${escapeHtml(s.title)}
-            <span class="sub">${s.type === "diss" ? "код диссертации" : "номенклатура"}${branch}</span>
+            <strong class="code">${escapeHtml(s.code)}</strong> ${branch} ${escapeHtml(s.title)}
+            <span class="sub">${s.type === "diss" ? "код диссертации" : "номенклатура"}</span>
           </button></li>`;
       })
       .join("");
@@ -204,17 +313,18 @@
       for (const link of items) {
         const s = specById.get(link.s);
         const branch = s.branch
-          ? `<p class="branch">${escapeHtml(s.branch)}</p>`
+          ? `<span class="branch">${escapeHtml(s.branch)}</span>`
           : "";
         const dates =
           sortedGroups.length === 1
             ? `<p class="dates">${formatDates(link)}</p>`
             : "";
-        html += `<li class="result-item">
-          <span class="code">${escapeHtml(s.code)}</span>
-          <p class="title">${escapeHtml(s.title)}</p>
-          ${branch}
-          ${dates}
+        html += `<li class="result-item clickable">
+          <a class="result-link" href="${escapeHtml(specialtyUrl(s))}">
+            <p class="spec-heading"><span class="code">${escapeHtml(s.code)}</span> ${branch}</p>
+            <p class="title">${escapeHtml(s.title)}</p>
+            ${dates}
+          </a>
         </li>`;
       }
       html += "</ul>";
@@ -229,9 +339,9 @@
     let links = linksBySpec.get(specId) || [];
     links = links.filter((l) => activeOn(l, iso));
 
-    el.resultsTitle.innerHTML = `<span class="code">${escapeHtml(s.code)}</span> ${escapeHtml(s.title)}`;
+    const branch = s.branch ? `<span class="branch">${escapeHtml(s.branch)}</span>` : "";
+    el.resultsTitle.innerHTML = `<span class="code">${escapeHtml(s.code)}</span> ${branch} ${escapeHtml(s.title)}`;
     el.resultsMeta.innerHTML = [
-      s.branch ? escapeHtml(s.branch) : null,
       iso ? `актуально на ${formatIsoRu(iso)}` : null,
       `${links.length} журналов`,
     ]
@@ -248,10 +358,12 @@
     let html = '<ul class="result-list">';
     for (const link of links) {
       const j = journalByNum.get(link.j);
-      html += `<li class="result-item">
-        <strong>№ ${j.n}</strong> ${escapeHtml(j.name)}
-        ${j.issn ? `<p class="branch">ISSN ${escapeHtml(j.issn)}</p>` : ""}
-        <p class="dates">${formatDates(link)}</p>
+      html += `<li class="result-item clickable">
+        <a class="result-link" href="${escapeHtml(journalUrl(j))}">
+          <strong>№ ${j.n}</strong> ${escapeHtml(j.name)}
+          ${j.issn ? `<p class="branch">ISSN ${escapeHtml(j.issn)}</p>` : ""}
+          <p class="dates">${formatDates(link)}</p>
+        </a>
       </li>`;
     }
     html += "</ul>";
@@ -271,6 +383,29 @@
     } else if (mode === "spec" && selectedSpec != null) {
       renderSpecResults(selectedSpec);
     }
+  }
+
+  function applyUrlState() {
+    const state = readUrlState();
+    setMode(state.mode, { syncUrl: false, focus: false });
+    el.search.value = state.query;
+    selectedJournal = null;
+    selectedSpec = null;
+    el.suggestions.hidden = true;
+
+    if (mode === "journal" && state.journal != null && journalByNum.has(state.journal)) {
+      selectedJournal = state.journal;
+    } else if (mode === "spec" && state.spec != null && specById.has(state.spec)) {
+      selectedSpec = state.spec;
+    }
+
+    if (selectedJournal != null || selectedSpec != null) {
+      showResults();
+    } else if (state.query.trim()) {
+      runSearch(state.query.trim());
+    }
+
+    writeUrlState();
   }
 
   async function load() {
@@ -293,6 +428,7 @@
 
     el.loading.hidden = true;
     el.app.hidden = false;
+    applyUrlState();
   }
 
   el.tabJournal.addEventListener("click", () => setMode("journal"));
@@ -304,6 +440,7 @@
     el.resultsPanel.hidden = true;
     el.emptyState.hidden = false;
     runSearch(el.search.value.trim());
+    debounceUrlState();
   });
 
   el.suggestions.addEventListener("click", (e) => {
@@ -318,10 +455,11 @@
       selectedSpec = Number(btn.dataset.spec);
       selectedJournal = null;
       const s = specById.get(selectedSpec);
-      el.search.value = `${s.code} ${s.title}`;
+      el.search.value = specialtyQuery(s);
     }
     el.suggestions.hidden = true;
     showResults();
+    writeUrlState();
   });
 
   el.filterDate.addEventListener("change", () => {
@@ -338,6 +476,8 @@
       el.suggestions.hidden = true;
     }
   });
+
+  window.addEventListener("popstate", applyUrlState);
 
   load().catch((err) => {
     el.loading.innerHTML = `<p>Не удалось загрузить данные: ${escapeHtml(err.message)}</p>`;
