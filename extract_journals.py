@@ -17,6 +17,7 @@ from config import AS_OF_LABEL, JOURNALS_XLSX, PDF_PATH, pdf_path_for_parsing
 ENTRY_START = re.compile(r"^(\d{1,4})\.\s+(?!\d)")
 ISSN_RE = re.compile(r"\b(\d{3,4})[\s\-–—]+(\d{3}[\dXxХх])\b")
 DATE_RE = re.compile(r"\b((?:с|по)\s+\d{2}\.\d{2}\.\d{4})\b", re.IGNORECASE)
+LAYOUT_DATE_RE = re.compile(r"^(?:с|по|до)\s+\d{1,2}\.[\d.]{5,}$", re.IGNORECASE)
 SPEC_LINE = re.compile(
     r"^("
     r"\d{1,2}\.\d{1,2}\.\d{1,2}\."
@@ -37,7 +38,50 @@ HEADER_MARKERS = (
 PAGE_BREAK = "\n<<<PDF_PAGE>>>\n"
 
 
+def layout_leading_dates(page) -> list[str]:
+    """Recover date-column text aligned with a page-leading specialty row."""
+    chunks: list[tuple[float, float, str]] = []
+
+    def visitor(text, cm, tm, font_dict, font_size):
+        s = (text or "").strip()
+        if s and not is_header_line(s):
+            chunks.append((float(tm[5]), float(tm[4]), s))
+
+    page.extract_text(visitor_text=visitor)
+    if not chunks:
+        return []
+
+    top_y = max(y for y, _x, _s in chunks)
+    top_chunks = [(y, x, s) for y, x, s in chunks if abs(y - top_y) <= 3]
+    if not any(x >= 250 and SPEC_LINE.match(s) for _y, x, s in top_chunks):
+        return []
+
+    dates = [
+        s
+        for y, x, s in chunks
+        if x >= 470 and abs(y - top_y) <= 3 and LAYOUT_DATE_RE.match(s)
+    ]
+    return dates
+
+
+def extract_page_text(page) -> str:
+    text = page.extract_text() or ""
+    leading_dates = layout_leading_dates(page)
+    if not leading_dates:
+        return text
+    existing = [line.strip() for line in text.splitlines() if line.strip()]
+    prefix = "\n".join(leading_dates)
+    if existing[: len(leading_dates)] == leading_dates:
+        return text
+    return f"{prefix}\n{text}"
+
+
 def extract_full_text(pdf_path: Path) -> str:
+    reader = PdfReader(str(pdf_path))
+    return PAGE_BREAK.join(extract_page_text(page) for page in reader.pages)
+
+
+def extract_full_text_plain(pdf_path: Path) -> str:
     reader = PdfReader(str(pdf_path))
     return PAGE_BREAK.join(page.extract_text() or "" for page in reader.pages)
 

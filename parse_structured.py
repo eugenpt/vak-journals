@@ -15,6 +15,7 @@ from openpyxl.utils import get_column_letter
 
 from config import AS_OF_LABEL, STRUCTURED_XLSX, pdf_path_for_parsing
 from extract_journals import ISSN_RE, extract_full_text, normalize_issn, parse_entry, split_entries
+from layout_table import LayoutEntry, extract_layout_entries, issn_text
 
 DATE_LINE = re.compile(r"^([сcСC]|по|до)\s+(\d{2}\.\d{2}\.\d{4})$")
 QUESTIONABLE_DATE_LINE = re.compile(
@@ -535,20 +536,8 @@ def apply_page_start(
             idx,
         )
 
-    first = page_lines[idx].strip()
-    if SPEC_START.match(first):
-        if any(parse_date_line(line.strip()) for line in page_lines):
-            return (
-                current,
-                segment_dates,
-                False,
-                pending_leading_dates,
-                pending_leading_date_notes,
-                skip,
-            )
-
-    # No date in the first row of the date column and no clean new specialty:
-    # the row continues from the previous page (branch/ISSN/title fragments).
+    # No date in the first row of the date column: the page starts with
+    # a continuation of the previous date row, even if a later row has a date.
     split_row_continue = True
     if is_branch_continuation_line(first) and current_specs:
         target = current if current is not None else current_specs[-1]
@@ -705,10 +694,6 @@ def parse_specs_segmented(after_issn: str) -> tuple[list[SpecRecord], str]:
             ),
             "",
         )
-        if SPEC_START.match(first_next) and any(
-            parse_date_line(line.strip()) for line in next_page
-        ):
-            return False
         rest = raw_page[line_i:]
         if rest and not all(not ln.strip() or parse_date_line(ln.strip()) for ln in rest):
             return False
@@ -829,7 +814,26 @@ def parse_specs_segmented(after_issn: str) -> tuple[list[SpecRecord], str]:
                                 raw_page, raw_i + 1, segment_dates
                             )
                             close_before = False
-                            if ahead_new and specs_on_page_since_break >= 2:
+                            new_code_type = "vak" if sm.group("vak") else "diss"
+                            prev_code_type = (
+                                current_specs[-1]["code_type"]
+                                if current_specs
+                                else new_code_type
+                            )
+                            if (
+                                ahead_new
+                                and specs_on_page_since_break >= 2
+                                and not (
+                                    prev_code_type == "diss"
+                                    and new_code_type == "diss"
+                                )
+                            ):
+                                close_before = True
+                            elif (
+                                ahead_new
+                                and specs_on_page_since_break >= 1
+                                and prev_code_type != new_code_type
+                            ):
                                 close_before = True
                             elif (
                                 ahead_new
@@ -916,6 +920,142 @@ def fill_missing_spec_dates(specs: list[SpecRecord], journal_dates: str) -> None
         return
     for s in specs:
         s.date_from, s.date_to, s.dates_raw = j_from, j_to, j_raw
+
+
+def parse_layout_journal(entry: LayoutEntry) -> JournalSpecs:
+    """Parse one journal from reconstructed PDF table cells."""
+    segments: list[tuple[list[dict], list[str], dict[str, str]]] = []
+    current_specs: list[dict] = []
+    current_dates: list[str] = []
+    current_date_notes: dict[str, str] = {}
+    current: dict | None = None
+    pending_dates: list[str] = []
+    pending_date_notes: dict[str, str] = {}
+
+    def close_segment() -> None:
+        nonlocal current_specs, current_dates, current_date_notes
+        if current_specs:
+            segments.append((current_specs, list(current_dates), dict(current_date_notes)))
+        current_specs = []
+        current_dates = []
+        current_date_notes = {}
+
+    def set_dates(date_text: str) -> None:
+        nonlocal current_dates, current_date_notes
+        for line in date_text.splitlines():
+            parsed = parse_date_line(line.strip())
+            if not parsed:
+                continue
+            normalized, note = parsed
+            if normalized not in current_dates:
+                current_dates.append(normalized)
+            if note:
+                current_date_notes[normalized] = note
+
+    def parsed_dates(date_text: str) -> tuple[list[str], dict[str, str]]:
+        dates: list[str] = []
+        notes: dict[str, str] = {}
+        for line in date_text.splitlines():
+            parsed = parse_date_line(line.strip())
+            if not parsed:
+                continue
+            normalized, note = parsed
+            dates.append(normalized)
+            if note:
+                notes[normalized] = note
+        return dates, notes
+
+    def start_spec(line: str, dates: list[str], notes: dict[str, str]) -> None:
+        nonlocal current, current_dates, current_date_notes, pending_dates, pending_date_notes
+        sm = SPEC_START.match(line)
+        if not sm:
+            return
+        if dates:
+            close_segment()
+            current_dates = list(dates)
+            current_date_notes = dict(notes)
+        elif pending_dates:
+            close_segment()
+            current_dates = list(pending_dates)
+            current_date_notes = dict(pending_date_notes)
+            pending_dates = []
+            pending_date_notes = {}
+        code = sm.group("vak") or sm.group("diss")
+        vak = sm.group("vak")
+        current = {
+            "code": code + ("." if vak and not code.endswith(".") else ""),
+            "code_type": "vak" if vak else "diss",
+            "title": line[sm.end() :].strip(),
+        }
+        current_specs.append(current)
+
+    for row in entry.rows:
+        spec = row.cell("spec")
+        date_cell = row.cell("date")
+        row_dates, row_notes = parsed_dates(date_cell)
+        parts = expand_spec_lines([spec]) if spec else []
+        first_part = parts[0] if parts else ""
+        starts = bool(first_part and SPEC_START.match(first_part))
+
+        if row_dates and not starts:
+            if current is not None:
+                for d in row_dates:
+                    if d not in current_dates:
+                        current_dates.append(d)
+                current_date_notes.update(row_notes)
+            else:
+                pending_dates = row_dates
+                pending_date_notes = row_notes
+
+        for part_i, part in enumerate(parts):
+            sm = SPEC_START.match(part)
+            if sm:
+                start_spec(part, row_dates if part_i == 0 else [], row_notes if part_i == 0 else {})
+            elif current is not None:
+                current["title"] = (current["title"] + " " + part).strip()
+
+        if row_dates and starts and not parts:
+            set_dates(date_cell)
+
+    close_segment()
+
+    records: list[SpecRecord] = []
+    for gi, (specs, dates, date_notes) in enumerate(segments):
+        d_from, d_to, d_raw = parse_dates_list(dates)
+        from_note = date_notes.get(f"с {d_from}", "") if d_from else ""
+        to_note = date_notes.get(f"по {d_to}", "") if d_to else ""
+        for s in specs:
+            title, branch = extract_branch(INLINE_DATE_RE.sub(" ", s["title"]).strip())
+            note_text = "; ".join(x for x in (from_note, to_note) if x)
+            branches = [normalize_branch(b) for b in branch.split(",")] if branch else [""]
+            for branch_part in [b.strip() for b in branches if b.strip() or not branch]:
+                records.append(
+                    SpecRecord(
+                        code=s["code"],
+                        code_type=s["code_type"],
+                        title=title,
+                        branch=branch_part,
+                        date_from=d_from,
+                        date_to=d_to,
+                        dates_raw=d_raw,
+                        date_from_unreliable=bool(from_note),
+                        date_to_unreliable=bool(to_note),
+                        date_notes=note_text,
+                        group_index=gi,
+                    )
+                )
+
+    name = re.sub(r"\s+", " ", " ".join(entry.name_lines)).strip()
+    return JournalSpecs(
+        num=entry.num,
+        name=name,
+        issn=normalize_issn(ISSN_RE.search(issn_text(" ".join(entry.issn_lines))))
+        if ISSN_RE.search(issn_text(" ".join(entry.issn_lines)))
+        else issn_text(" ".join(entry.issn_lines)),
+        journal_dates="",
+        specs=records,
+        parse_notes="layout",
+    )
 
 
 def find_spec_region_start(block: str) -> int:
