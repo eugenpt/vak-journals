@@ -8,6 +8,20 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- Yandex.Metrika counter -->
+  <script type="text/javascript">
+      (function(m,e,t,r,i,k,a){
+          m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+          m[i].l=1*new Date();
+          for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+          k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+      })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=109254268', 'ym');
+
+      ym(109254268, 'init', {ssr:true, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+  </script>
+  <noscript><div><img src="https://mc.yandex.ru/watch/109254268" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+  <!-- /Yandex.Metrika counter -->
+
   <header class="site-header">
     <div class="header-inner">
       <div class="brand">
@@ -17,7 +31,7 @@
       <p class="disclaimer">
         Неофициальный справочник по данным PDF ВАК.
         <a id="link-official" href="https://vak.gisnauka.ru/documents/editions" target="_blank" rel="noopener">Официальный документ</a>
-        <span id="analytics-note" hidden> · <a href="https://yandex.ru/legal/confidential/" target="_blank" rel="noopener">Метрика</a> (статистика посещений)</span>
+        <span id="analytics-note"> · <a href="https://yandex.ru/legal/confidential/" target="_blank" rel="noopener">Метрика</a> (статистика посещений)</span>
       </p>
     </div>
   </header>
@@ -74,14 +88,7 @@
     </p>
   </footer>
 
-  <script src="site-config.js"></script>
-  <script src="metrika.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/minisearch@7.1.2/dist/umd/index.js"></script>
   <script src="app.js"></script>
-  <script>
-    if (document.body.dataset.metrika) {
-      document.getElementById("analytics-note").hidden = false;
-    }
-  </script>
 </body>
 </html>
