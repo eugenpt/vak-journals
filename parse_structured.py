@@ -30,6 +30,11 @@ SPEC_START = re.compile(
     r")"
 )
 BRANCH_RE = re.compile(r"\(([^)]+)\)\s*$")
+# Split when a new specialty code appears mid-line (after ISSN / rename notes)
+EMBEDDED_SPEC = re.compile(
+    r"(?=(?:\d{1,2}\.\d{1,2}\.\d{1,2}\.\s)|(?:\d{2}\.\d{2}\.\d{2}\s*[–—\-]\s))"
+)
+ISSN_INLINE = re.compile(r"[,;\s]*ISSN\s+[\dXxХх\-–—\s,\)»«\"]+", re.IGNORECASE)
 
 
 @dataclass
@@ -68,8 +73,41 @@ def parse_dates_list(date_strs: list[str]) -> tuple[str, str, str]:
 def extract_branch(title: str) -> tuple[str, str]:
     m = BRANCH_RE.search(title)
     if not m:
-        return title.strip(" ,"), ""
-    return title[: m.start()].strip(" ,"), m.group(1).strip()
+        return clean_spec_title(title.strip(" ,")), ""
+    core = clean_spec_title(title[: m.start()].strip(" ,"))
+    return core, m.group(1).strip()
+
+
+def clean_spec_title(title: str) -> str:
+    """Remove ISSN / rename-note debris often injected by PDF line breaks."""
+    t = ISSN_INLINE.sub("", title)
+    t = re.sub(r"\s+", " ", t).strip(" ,;)")
+    return t
+
+
+def is_issn_junk_line(line: str) -> bool:
+    """Lines that are only old ISSN / title fragments, not specialties."""
+    if SPEC_START.match(line):
+        return False
+    if not re.search(r"ISSN", line, re.IGNORECASE):
+        return False
+    rest = re.sub(r"ISSN\s*", "", line, flags=re.IGNORECASE)
+    rest = re.sub(r"[\dXxХх\-–—\s,\)»«\"«]+", "", rest)
+    return len(rest) < 2
+
+
+def expand_spec_lines(lines: list[str]) -> list[str]:
+    """One PDF line may contain 'ISSN …) 5.3.4. Title' — split before tokenizing."""
+    out: list[str] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        parts = [p.strip() for p in EMBEDDED_SPEC.split(line) if p.strip()]
+        for part in parts or [line]:
+            if not is_issn_junk_line(part):
+                out.append(part)
+    return out
 
 
 def tokenize_spec_region(lines: list[str]) -> list[dict]:
@@ -109,7 +147,8 @@ def tokenize_spec_region(lines: list[str]) -> list[dict]:
 
 
 def parse_specs_segmented(after_issn: str) -> tuple[list[SpecRecord], str]:
-    lines = [l.strip() for l in after_issn.splitlines() if l.strip()]
+    raw = [l.strip() for l in after_issn.splitlines() if l.strip()]
+    lines = expand_spec_lines(raw)
     tokens = tokenize_spec_region(lines)
     segments: list[tuple[list[dict], list[str]]] = []
     current_specs: list[dict] = []
