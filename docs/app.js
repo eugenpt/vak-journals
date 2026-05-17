@@ -16,6 +16,8 @@
   const validModes = new Set(["journal", "spec"]);
   const urlStateDebounceMs = 300;
   const rcsiProxyUrl = "https://vak-journals-proxy.eugen-pt.workers.dev/";
+  const dateFilterParam = "date_filter";
+  const dateParam = "date";
   const defaultTitle = "Перечень рецензируемых изданий ВАК — поиск";
   const defaultDescription =
     "Поиск журналов ВАК для публикаций по кандидатским и докторским диссертациям: научные специальности, паспорта специальностей, ISSN, даты включения и исключения из перечня.";
@@ -131,6 +133,40 @@
     return String(code || "").replace(/\s+/g, "").replace(/\.$/, "");
   }
 
+  function isIsoDate(value) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(value || "");
+  }
+
+  function readDateFilterState(params) {
+    const rawFilter = params.get(dateFilterParam);
+    const rawDate = params.get(dateParam);
+    const filterOffValues = new Set(["0", "false", "off", "no"]);
+    return {
+      filterDate:
+        rawFilter == null ? null : !filterOffValues.has(rawFilter.trim().toLowerCase()),
+      date: isIsoDate(rawDate) ? rawDate : null,
+    };
+  }
+
+  function applyDateFilterState(state) {
+    if (state.date) {
+      el.date.value = state.date;
+    }
+    if (state.filterDate != null) {
+      el.filterDate.checked = state.filterDate;
+    }
+    el.date.disabled = !el.filterDate.checked;
+  }
+
+  function writeDateFilterState(url) {
+    url.searchParams.set(dateFilterParam, el.filterDate.checked ? "1" : "0");
+    if (el.date.value) {
+      url.searchParams.set(dateParam, el.date.value);
+    } else {
+      url.searchParams.delete(dateParam);
+    }
+  }
+
   function readUrlState() {
     const params = new URLSearchParams(window.location.search);
     const urlMode = params.get("mode");
@@ -139,6 +175,7 @@
       query: params.get("q") || "",
       journal: Number(params.get("journal")) || null,
       spec: Number(params.get("spec")) || null,
+      dateFilter: readDateFilterState(params),
     };
   }
 
@@ -164,6 +201,7 @@
     if (mode === "spec" && selectedSpec != null) {
       url.searchParams.set("spec", String(selectedSpec));
     }
+    writeDateFilterState(url);
     window.history.replaceState({ mode, query }, "", url);
   }
 
@@ -288,6 +326,7 @@
     url.searchParams.set("q", specialtyQuery(s));
     url.searchParams.set("spec", String(s.id));
     url.searchParams.delete("journal");
+    writeDateFilterState(url);
     return url.href;
   }
 
@@ -297,6 +336,7 @@
     url.searchParams.set("q", j.name);
     url.searchParams.set("journal", String(j.n));
     url.searchParams.delete("spec");
+    writeDateFilterState(url);
     return url.href;
   }
 
@@ -614,6 +654,7 @@
   function applyUrlState() {
     const state = readUrlState();
     setMode(state.mode, { syncUrl: false, focus: false });
+    applyDateFilterState(state.dateFilter);
     el.search.value = state.query;
     selectedJournal = null;
     selectedSpec = null;
@@ -643,7 +684,6 @@
     for (const s of data.specialties) specById.set(s.id, s);
     indexLinks();
     initSearch();
-    renderPopularSpecialties();
 
     el.metaAsOf.textContent = data.meta.as_of_label || `по состоянию на ${data.meta.as_of}`;
     if (data.meta.editions_url) {
@@ -658,6 +698,7 @@
     el.loading.hidden = true;
     el.app.hidden = false;
     applyUrlState();
+    renderPopularSpecialties();
   }
 
   el.tabJournal.addEventListener("click", () => setMode("journal"));
@@ -695,12 +736,16 @@
   el.filterDate.addEventListener("change", () => {
     el.date.disabled = !el.filterDate.checked;
     if (selectedJournal != null || selectedSpec != null) showResults();
+    renderPopularSpecialties();
     refreshSearchIfTyping();
+    writeUrlState();
   });
 
   el.date.addEventListener("change", () => {
     if (selectedJournal != null || selectedSpec != null) showResults();
+    renderPopularSpecialties();
     refreshSearchIfTyping();
+    writeUrlState();
   });
 
   document.addEventListener("click", (e) => {
