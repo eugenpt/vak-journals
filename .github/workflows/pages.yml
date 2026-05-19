@@ -27,6 +27,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Download PDF and build initial data
+        run: python build.py --download
+
       - name: Fetch Scopus data
         env:
           SCOPUS_API_KEY: ${{ secrets.SCOPUS_API_KEY }}
@@ -35,10 +38,8 @@ jobs:
       - name: Fetch RCSI data
         run: python fetch_rcsi.py
 
-      - name: Download PDF and build data
-        env:
-          SCOPUS_API_KEY: ${{ secrets.SCOPUS_API_KEY }}
-        run: python build.py --download
+      - name: Rebuild with index data
+        run: python build.py
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
