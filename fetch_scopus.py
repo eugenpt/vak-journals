@@ -217,10 +217,17 @@ def main() -> int:
     print(f"To fetch: {len(to_fetch)}")
 
     if to_fetch:
-        start = time.time()
-        fetched, errors = fetch_batch(to_fetch, api_key, cache)
-        elapsed = time.time() - start
-        print(f"Fetched: {fetched}, errors: {errors} in {elapsed:.0f}s")
+        # Health check: try one request to detect Elsevier blocking
+        test_issn = to_fetch[0]
+        test_result = fetch_one(test_issn, api_key, threading.Lock(), [])
+        if test_result[1] is None:
+            print(f"  Scopus API unreachable (first test failed) — using cached data only")
+            save_cache(cache)
+        else:
+            start = time.time()
+            fetched, errors = fetch_batch(to_fetch, api_key, cache)
+            elapsed = time.time() - start
+            print(f"Fetched: {fetched}, errors: {errors} in {elapsed:.0f}s")
     else:
         print("Nothing to fetch.")
         save_cache(cache)
