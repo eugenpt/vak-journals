@@ -4,9 +4,12 @@ __pycache__/
 .venv-*/
 venv/
 .env
+.scopus_key
 
 # Downloaded PDF (fetch via script; do not commit)
 data/*.pdf
+data/scopus_cache.json
+data/rcsi_cache.json
 
 # Generated outputs (rebuild with scripts)
 output/*

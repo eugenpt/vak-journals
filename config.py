@@ -24,6 +24,8 @@ STRUCTURED_XLSX = OUTPUT_DIR / "journals_structured.xlsx"
 DOCS_DIR = ROOT / "docs"
 JSON_DATA = DOCS_DIR / "data" / "vak.json"
 SITEMAP_XML = DOCS_DIR / "sitemap.xml"
+SCOPUS_CACHE = DATA_DIR / "scopus_cache.json"
+RCSI_CACHE = DATA_DIR / "rcsi_cache.json"
 
 
 def read_source_location() -> str:

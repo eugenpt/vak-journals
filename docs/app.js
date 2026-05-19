@@ -15,7 +15,6 @@
   let selectedSpec = null;
   const validModes = new Set(["journal", "spec"]);
   const urlStateDebounceMs = 300;
-  const rcsiProxyUrl = "https://vak-journals-proxy.eugen-pt.workers.dev/";
   const dateFilterParam = "date_filter";
   const dateParam = "date";
   const defaultTitle = "Перечень рецензируемых изданий ВАК — поиск";
@@ -36,7 +35,6 @@
     "12.00.08",
   ];
   let urlStateTimer = null;
-  let rcsiRequestSeq = 0;
 
   const el = {
     loading: $("#loading"),
@@ -397,55 +395,32 @@
     return url.href;
   }
 
-  function rcsiDetailsUrl(record) {
-    if (record.id) {
-      return `https://journalrank.rcsi.science/ru/record-sources/details/${encodeURIComponent(record.id)}/`;
+  function renderRcsiBlock(j) {
+    const r = j.rcsi;
+    if (!r) return "";
+
+    if (!r.inRcsi) {
+      return `<section class="rcsi-card">
+        <p class="rcsi-status-link"><a href="${escapeHtml(rcsiSearchUrl(j))}" target="_blank" rel="noopener">Проверить в официальном поиске РЦНИ</a></p>
+      </section>`;
     }
-    if (record.url) {
-      return new URL(record.url, "https://journalrank.rcsi.science/ru/").href;
-    }
-    return null;
-  }
 
-  function formatRcsiDate(iso) {
-    if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-    const [y, m, d] = iso.split("-");
-    return `${d}.${m}.${y}`;
-  }
+    const levelParts = [];
+    if (r.level_2025 != null) levelParts.push(`2025: уровень ${escapeHtml(String(r.level_2025))}`);
+    if (r.level_2023 != null) levelParts.push(`2023: уровень ${escapeHtml(String(r.level_2023))}`);
 
-  function renderRcsiShell(j) {
-    return `<section class="rcsi-card" id="rcsi-card">
-      <div class="rcsi-status" id="rcsi-status"></div>
-      <a href="${escapeHtml(rcsiSearchUrl(j))}" target="_blank" rel="noopener">
-        Проверить в официальном поиске РЦНИ
-      </a>
-    </section>`;
-  }
+    const dateParts = [];
+    if (r.dateAccepted) dateParts.push(`включён ${escapeHtml(formatIsoRu(r.dateAccepted))}`);
+    if (r.dateDiscontinued) dateParts.push(`исключён ${escapeHtml(formatIsoRu(r.dateDiscontinued))}`);
 
-  function renderRcsiInfo(record) {
-    const levelParts = [
-      record.level_2025 == null ? null : `2025: уровень ${escapeHtml(record.level_2025)}`,
-      record.level_2023 == null ? null : `2023: уровень ${escapeHtml(record.level_2023)}`,
-    ].filter(Boolean);
-    const dateParts = [
-      formatRcsiDate(record.dateAccepted)
-        ? `включён ${escapeHtml(formatRcsiDate(record.dateAccepted))}`
-        : null,
-      formatRcsiDate(record.dateDiscontinued)
-        ? `исключён ${escapeHtml(formatRcsiDate(record.dateDiscontinued))}`
-        : null,
-    ].filter(Boolean);
-    const detailsUrl = rcsiDetailsUrl(record);
+    const detailsId = r.id;
+    const detailsUrl = detailsId
+      ? `https://journalrank.rcsi.science/ru/record-sources/details/${encodeURIComponent(detailsId)}/`
+      : null;
+
     const rows = [];
-
-    if (!levelParts.length && !dateParts.length) {
-      return "";
-    }
-
-    rows.push(`<div class="rcsi-heading">
-      <strong>Белый список РЦНИ</strong>
-      <span class="rcsi-note">уровень 1–4, не категория ВАК К1–К3</span>
-    </div>`);
+    rows.push(`<section class="rcsi-card">`);
+    rows.push(`<div class="rcsi-heading"><strong>Белый список РЦНИ</strong></div>`);
     if (levelParts.length) {
       rows.push(`<p class="rcsi-levels">${levelParts.join(" · ")}</p>`);
     }
@@ -453,11 +428,9 @@
       rows.push(`<p class="rcsi-dates">${dateParts.join(" · ")}</p>`);
     }
     if (detailsUrl) {
-      rows.push(
-        `<p><a href="${escapeHtml(detailsUrl)}" target="_blank" rel="noopener">Карточка РЦНИ</a></p>`
-      );
+      rows.push(`<p><a href="${escapeHtml(detailsUrl)}" target="_blank" rel="noopener">Карточка РЦНИ</a></p>`);
     }
-
+    rows.push("</section>");
     return rows.join("");
   }
 
@@ -471,21 +444,50 @@
     </div>`;
   }
 
-  async function loadRcsiInfo(j, requestId) {
-    const status = $("#rcsi-status");
-    if (!status || !j.issn) return;
+  /* ---- Scopus ---- */
 
-    try {
-      const url = new URL(rcsiProxyUrl);
-      url.searchParams.set("issn", j.issn);
-      const res = await fetch(url.href, { headers: { Accept: "application/json" } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const record = await res.json();
-      if (requestId !== rcsiRequestSeq || selectedJournal !== j.n) return;
-      status.innerHTML = renderRcsiInfo(record);
-    } catch (_err) {
-      if (requestId === rcsiRequestSeq) status.textContent = "";
+  function renderScopusBlock(j) {
+    const s = j.scopus;
+    if (!s && !j.issn) return "";
+
+    if (s && s.inScopus) {
+      const fetchedInfo = data.meta.scopus_fetched_at
+        ? `<span class="rcsi-note">от ${formatIsoRu(data.meta.scopus_fetched_at.slice(0, 10))}</span>`
+        : "";
+      const metrics = [];
+      if (s.citeScore != null) metrics.push(`CiteScore ${s.citeScore} (${s.citeScoreYear || "?"})`);
+      if (s.sjr && s.sjr.length) metrics.push(`SJR ${s.sjr[0].value} (${s.sjr[0].year})`);
+      if (s.snip && s.snip.length) metrics.push(`SNIP ${s.snip[0].value} (${s.snip[0].year})`);
+
+      let linkHtml = "";
+      if (s.scopusLink) {
+        linkHtml = `<p><a href="${escapeHtml(s.scopusLink)}" target="_blank" rel="noopener">Карточка источника в Scopus</a></p>`;
+      }
+
+      return `<section class="rcsi-card"><div class="rcsi-status">
+        <div class="rcsi-heading">
+          <strong>Scopus</strong>
+          ${fetchedInfo}
+        </div>
+        <p class="rcsi-levels">${escapeHtml(metrics.join(" · "))}</p>
+        ${linkHtml}
+        </div>
+      </section>`;
     }
+
+    if (s) {
+      return `<section class="rcsi-card">
+        <p class="rcsi-status-link"><a href="https://www.scopus.com/sources?searchField=issn&searchValue=${encodeURIComponent(j.issn)}" target="_blank" rel="noopener">Проверить в Scopus</a></p>
+      </section>`;
+    }
+
+    if (j.issn) {
+      return `<section class="rcsi-card">
+        <p class="rcsi-status-link"><a href="https://www.scopus.com/sources?searchField=issn&searchValue=${encodeURIComponent(j.issn)}" target="_blank" rel="noopener">Проверить в Scopus</a></p>
+      </section>`;
+    }
+
+    return "";
   }
 
   function runSearch(q) {
@@ -543,13 +545,10 @@
       `Журнал «${j.name}» в Перечне ВАК: ISSN ${j.issn || "не указан"}, ${links.length} специальностей${iso ? ` на ${formatIsoRu(iso)}` : ""}.`
     );
 
-    const rcsiRequestId = ++rcsiRequestSeq;
-
     if (!links.length) {
       el.resultsBody.innerHTML =
-        `${renderRcsiShell(j)}
+        `<div class="indexing-row">${renderRcsiBlock(j)}${renderScopusBlock(j)}</div>
         <p class="hint">Нет специальностей для выбранных условий (проверьте фильтр по дате).</p>`;
-      loadRcsiInfo(j, rcsiRequestId);
       return;
     }
 
@@ -560,7 +559,7 @@
       groups.get(key).push(link);
     }
 
-    let html = renderRcsiShell(j);
+    let html = `<div class="indexing-row">${renderRcsiBlock(j)}${renderScopusBlock(j)}</div>`;
     const sortedGroups = [...groups.keys()].sort((a, b) => a - b);
     for (const g of sortedGroups) {
       const items = groups.get(g);
@@ -590,7 +589,6 @@
       html += "</ul>";
     }
     el.resultsBody.innerHTML = html;
-    loadRcsiInfo(j, rcsiRequestId);
   }
 
   function renderSpecResults(specId) {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,8 @@ from config import (
     ROOT,
     SITE_URL,
     SITEMAP_XML,
+    SCOPUS_CACHE,
+    RCSI_CACHE,
 )
 from parse_structured import JournalSpecs, parse_all
 
@@ -218,9 +221,60 @@ def build_payload(journals: list[JournalSpecs]) -> dict:
     }
 
 
+def apply_scopus(payload: dict) -> int:
+    """Merge Scopus cache data into payload journals (in-place).
+
+    Returns number of journals in Scopus, or 0 if no cache or no key.
+    """
+    if not SCOPUS_CACHE.is_file():
+        return 0
+
+    try:
+        from fetch_scopus import merge_scopus, normalize_issn
+    except ImportError:
+        return 0
+
+    cache = json.loads(SCOPUS_CACHE.read_text(encoding="utf-8"))
+    if not cache:
+        return 0
+
+    # Collect relevant ISSNs from payload
+    issns: set[str] = set()
+    for j in payload["journals"]:
+        normalized = normalize_issn(j.get("issn"))
+        if normalized:
+            issns.add(normalized)
+
+    return merge_scopus(payload, cache, issns)
+
+
+def apply_rcsi(payload: dict) -> int:
+    """Merge RCSI cache data into payload journals (in-place).
+
+    Returns number of journals in RCSI, or 0 if no cache.
+    """
+    if not RCSI_CACHE.is_file():
+        return 0
+
+    try:
+        from fetch_rcsi import merge, normalize_issn
+    except ImportError:
+        return 0
+
+    cache = json.loads(RCSI_CACHE.read_text(encoding="utf-8"))
+    if not cache:
+        return 0
+
+    issns: set[str] = set()
+    for j in payload["journals"]:
+        normalized = normalize_issn(j.get("issn"))
+        if normalized:
+            issns.add(normalized)
+
+    return merge(payload, cache, issns)
+
+
 def build_sitemap() -> str:
-    # The current site is a single-page app. Listing every query URL here would
-    # advertise many URLs that all serve the same static HTML before JS runs.
     urls = [SITE_URL]
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -249,6 +303,18 @@ def write_json(journals: list[JournalSpecs], out_path: Path | None = None) -> Pa
         f"{payload['meta'].get('passport_count', 0)} found, "
         f"{passport_matches} matched"
     )
+    scopus_matched = apply_scopus(payload)
+    if scopus_matched:
+        print(
+            "Scopus: "
+            f"{scopus_matched} journals in Scopus"
+        )
+    rcsi_matched = apply_rcsi(payload)
+    if rcsi_matched:
+        print(
+            "RCSI: "
+            f"{rcsi_matched} journals in RCSI"
+        )
     out_path.write_text(
         json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
         encoding="utf-8",

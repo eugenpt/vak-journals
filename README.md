@@ -41,7 +41,8 @@ pip install -r requirements.txt
 | `extract_journals.py` | PDF → `output/journals.xlsx` |
 | `parse_structured.py` | PDF → `output/journals_structured.xlsx` (журналы, специальности, связи, даты) |
 | `build.py` | Всё сразу (XLSX + `docs/data/vak.json` для сайта) |
-| `export_json.py` | Только JSON для фронтенда |
+| `fetch_scopus.py` | Batch-фетч Scopus данных (SJR, SNIP, CiteScore) через Elsevier API, кеширование |
+| `fetch_rcsi.py` | Batch-фетч данных РЦНИ (уровень, даты) через journalrank.rcsi.science, кеширование |
 
 ```bash
 python download.py
@@ -94,17 +95,28 @@ python -m http.server 8080
 
 ### Белый список РЦНИ
 
-В карточке журнала сайт делает live-запрос к Cloudflare Worker:
+В карточке журнала отображается блок **Белый список РЦНИ**: уровень (2023/2025), даты включения/исключения, ссылка на карточку. Данные фетчатся один раз при сборке через [`fetch_rcsi.py`](fetch_rcsi.py) и встраиваются в `vak.json` — без Cloudflare Worker.
 
-```text
-https://vak-journals-proxy.eugen-pt.workers.dev/?issn=2587-7534
+### Scopus
+
+В карточке журнала отображается блок **Scopus**: CiteScore, SJR, SNIP, ссылка на карточку источника. Данные фетчатся один раз при сборке через [`fetch_scopus.py`](fetch_scopus.py) и встраиваются в `vak.json` — никаких live-запросов из браузера.
+
+Для работы нужен **бесплатный API-ключ Elsevier** (регистрация на [dev.elsevier.com](https://dev.elsevier.com), ~5000 запросов/неделю).
+
+Ключ хранится в GitHub Actions secret `SCOPUS_API_KEY`. При локальной сборке задать через переменную окружения:
+
+```bash
+set SCOPUS_API_KEY=ваш_ключ
+python build.py --download
 ```
 
-Worker проксирует официальный API РЦНИ `journalrank.rcsi.science`, потому что браузерный `fetch` с GitHub Pages не может читать этот API напрямую без CORS-заголовков. Код Worker лежит в [`workers/rcsi-proxy.js`](workers/rcsi-proxy.js); CORS разрешён для опубликованного сайта и `http://localhost:8080`.
+Или положить ключ (одной строкой) в `.scopus_key` (файл в `.gitignore`) и запустить `run_local.bat`:
 
-Чтобы обновить Worker: Cloudflare → Workers & Pages → `vak-journals-proxy` → Edit code → вставить содержимое `workers/rcsi-proxy.js` → Deploy.
+```bash
+run_local.bat
+```
 
-На сайте этот блок подписан как **«Белый список РЦНИ (уровень 1–4)»**. Это не категории ВАК К1–К3.
+Скрипт кеширует результаты в `data/scopus_cache.json` (не коммитится) — при повторном билде перезапрашиваются только новые ISSN. Фетчит параллельно (6 потоков, укладываясь в лимит API 6 запросов/с) — ~9 минут на все ISSN.
 
 ### Статистика (Яндекс.Метрика)
 
@@ -130,9 +142,11 @@ vak-journals/
 ├── parse_structured.py
 ├── build.py
 ├── export_json.py
+├── fetch_scopus.py      # Scopus данные через Elsevier API
+├── fetch_rcsi.py        # РЦНИ данные (журналrank.rcsi.science)
+├── run_local.bat        # Локальная сборка (Windows)
 ├── requirements.txt
 ├── docs/              # GitHub Pages (index.html, data/vak.json)
-├── workers/           # Cloudflare Worker для live-запросов РЦНИ
 ├── .github/workflows/ # pages.yml
 ├── data/              # PDF (gitignored)
 └── output/            # XLSX (gitignored)

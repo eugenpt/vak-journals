@@ -325,18 +325,13 @@ body {
   align-items: baseline;
 }
 
-.rcsi-note,
-.rcsi-status {
+.rcsi-note {
   color: var(--muted);
   font-size: 0.85rem;
 }
 
-.rcsi-status {
-  margin-top: 0.35rem;
-}
-
-.rcsi-status p {
-  margin: 0.2rem 0 0;
+.rcsi-status-link a {
+  color: var(--accent);
 }
 
 .rcsi-levels {
@@ -354,8 +349,21 @@ body {
   color: var(--accent);
 }
 
+/* Indexing cards side by side */
+.indexing-row {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.indexing-row > .rcsi-card {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+}
+
+
 .spec-tools {
-  margin: 1rem 0 0;
   padding: 0.85rem 1rem;
   border: 1px solid var(--border);
   border-radius: 8px;
