@@ -89,6 +89,32 @@
           <span>Только актуальные на дату</span>
         </label>
         <input type="date" id="date" class="input input-date">
+
+        <label class="checkbox">
+          <input type="checkbox" id="filter-scopus">
+          <span>Только в Scopus</span>
+        </label>
+
+        <label class="field-inline">
+          <span class="field-label-inline">РЦНИ</span>
+          <select id="filter-rcsi-level" class="input-select">
+            <option value="">не важно</option>
+            <option value="any">есть</option>
+            <option value="1">уровень 1</option>
+            <option value="1+2">уровень 1–2</option>
+            <option value="1+2+3">уровень 1–3</option>
+          </select>
+        </label>
+
+        <label class="field-inline">
+          <span class="field-label-inline">ВАК</span>
+          <select id="filter-vak-cat" class="input-select">
+            <option value="">не важно</option>
+            <option value="К1">К1</option>
+            <option value="К2">К2</option>
+            <option value="К3">К3</option>
+          </select>
+        </label>
       </div>
 
       <ul class="suggestions" id="suggestions" hidden></ul>

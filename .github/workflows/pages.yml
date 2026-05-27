@@ -41,6 +41,12 @@ jobs:
       - name: Rebuild with index data
         run: python build.py
 
+      - name: Match VAK categories
+        run: |
+          curl -sL -o data/vak_k_categories.pdf \
+            "https://vak.gisnauka.ru/s3-files/01cc80c69fae4988a0246a8f5e2774e7:fisgna/public/media/uploaded/news_files/95b18614-ac93-490c-9650-0b545506660c/7c0ef8d2-d0b2-4ffc-ba4b-ecece35288f0.pdf"
+          python data/match_k_cats.py
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

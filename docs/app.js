@@ -17,6 +17,9 @@
   const urlStateDebounceMs = 300;
   const dateFilterParam = "date_filter";
   const dateParam = "date";
+  const scopusFilterParam = "scopus";
+  const rcsiLevelParam = "rcsi_level";
+  const vakCatParam = "vak_cat";
   const defaultTitle = "Перечень рецензируемых изданий ВАК — поиск";
   const defaultDescription =
     "Поиск журналов ВАК для публикаций по кандидатским и докторским диссертациям: научные специальности, паспорта специальностей, ISSN, даты включения и исключения из перечня.";
@@ -46,6 +49,9 @@
     suggestions: $("#suggestions"),
     filterDate: $("#filter-date"),
     date: $("#date"),
+    filterScopus: $("#filter-scopus"),
+    filterRcsiLevel: $("#filter-rcsi-level"),
+    filterVakCat: $("#filter-vak-cat"),
     resultsPanel: $("#results-panel"),
     resultsTitle: $("#results-title"),
     resultsMeta: $("#results-meta"),
@@ -95,6 +101,80 @@
     return el.filterDate.checked ? el.date.value : null;
   }
 
+  /* ---- Journal-level filters ---- */
+
+  function journalPassesScopus(j) {
+    if (!el.filterScopus.checked) return true;
+    return j.scopus && j.scopus.inScopus === true;
+  }
+
+  function journalRcsiLevel(j) {
+    const r = j.rcsi;
+    if (!r || !r.inRcsi) return null;
+    return r.level_2025 ?? r.level_2023 ?? null;
+  }
+
+  function journalPassesRcsi(j) {
+    const val = el.filterRcsiLevel.value;
+    if (!val) return true; // "не важно"
+    if (val === "any") {
+      return j.rcsi && j.rcsi.inRcsi === true;
+    }
+    const level = journalRcsiLevel(j);
+    if (level === null) return false;
+    // val is "1", "1+2", or "1+2+3" — match if level <= max in expression
+    const maxLevel = parseInt(val.split("+").pop(), 10);
+    return level <= maxLevel;
+  }
+
+  function journalPassesVakCat(j) {
+    const val = el.filterVakCat.value;
+    if (!val) return true;
+    return j.vak_cat === val;
+  }
+
+  function journalPassesFilters(j) {
+    return journalPassesScopus(j) && journalPassesRcsi(j) && journalPassesVakCat(j);
+  }
+
+  function anyFiltersActive() {
+    return el.filterScopus.checked || el.filterRcsiLevel.value !== "" || el.filterVakCat.value !== "";
+  }
+
+  /* ---- Specialty helpers with filters ---- */
+
+  function specialtyHasPassingJournal(s) {
+    const links = linksBySpec.get(s.id) || [];
+    const iso = filterIso();
+    return links.some((l) => {
+      if (iso && !activeOn(l, iso)) return false;
+      const j = journalByNum.get(l.j);
+      return j && journalPassesFilters(j);
+    });
+  }
+
+  function countPassingJournals(s) {
+    const links = linksBySpec.get(s.id) || [];
+    const iso = filterIso();
+    let count = 0;
+    for (const l of links) {
+      if (iso && !activeOn(l, iso)) continue;
+      const j = journalByNum.get(l.j);
+      if (j && journalPassesFilters(j)) count++;
+    }
+    return count;
+  }
+
+  function totalPassingInSpecFilter(s) {
+    /* total journals for this specialty before journal-level filters */
+    const links = linksBySpec.get(s.id) || [];
+    const iso = filterIso();
+    if (!iso) return links.length;
+    return links.filter((l) => activeOn(l, iso)).length;
+  }
+
+  /* ---- End filter helpers ---- */
+
   function formatDates(link) {
     const parts = [];
     const note = link.date_notes ? ` title="${escapeHtml(link.date_notes)}"` : "";
@@ -135,6 +215,8 @@
     return /^\d{4}-\d{2}-\d{2}$/.test(value || "");
   }
 
+  /* ---- URL state ---- */
+
   function readDateFilterState(params) {
     const rawFilter = params.get(dateFilterParam);
     const rawDate = params.get(dateParam);
@@ -165,6 +247,42 @@
     }
   }
 
+  function readJournalFilterState(params) {
+    return {
+      filterScopus: params.get(scopusFilterParam) === "1",
+      rcsiLevel: params.get(rcsiLevelParam) || "",
+      vakCat: params.get(vakCatParam) || "",
+    };
+  }
+
+  function applyJournalFilterState(state) {
+    el.filterScopus.checked = state.filterScopus;
+    el.filterRcsiLevel.value = state.rcsiLevel;
+    if (state.rcsiLevel && !["", "any", "1", "1+2", "1+2+3"].includes(state.rcsiLevel)) {
+      el.filterRcsiLevel.value = "";
+    }
+    el.filterVakCat.value = state.vakCat;
+    if (state.vakCat && !["", "К1", "К2", "К3"].includes(state.vakCat)) {
+      el.filterVakCat.value = "";
+    }
+  }
+
+  function writeJournalFilterState(url) {
+    url.searchParams.set(scopusFilterParam, el.filterScopus.checked ? "1" : "0");
+    const r = el.filterRcsiLevel.value;
+    if (r) {
+      url.searchParams.set(rcsiLevelParam, r);
+    } else {
+      url.searchParams.delete(rcsiLevelParam);
+    }
+    const v = el.filterVakCat.value;
+    if (v) {
+      url.searchParams.set(vakCatParam, v);
+    } else {
+      url.searchParams.delete(vakCatParam);
+    }
+  }
+
   function readUrlState() {
     const params = new URLSearchParams(window.location.search);
     const urlMode = params.get("mode");
@@ -174,6 +292,7 @@
       journal: Number(params.get("journal")) || null,
       spec: Number(params.get("spec")) || null,
       dateFilter: readDateFilterState(params),
+      journalFilter: readJournalFilterState(params),
     };
   }
 
@@ -200,6 +319,7 @@
       url.searchParams.set("spec", String(selectedSpec));
     }
     writeDateFilterState(url);
+    writeJournalFilterState(url);
     window.history.replaceState({ mode, query }, "", url);
   }
 
@@ -275,18 +395,23 @@
     };
   }
 
-  function specialtyActiveOn(s, isoDate) {
-    if (!isoDate) return true;
-    return (linksBySpec.get(s.id) || []).some((link) => activeOn(link, isoDate));
-  }
-
   function searchSpecialties(q, limit = 12) {
     const needle = q.trim();
     const normalizedNeedle = normalizeForMatch(needle);
     const iso = filterIso();
-    const candidates = iso
-      ? data.specialties.filter((s) => specialtyActiveOn(s, iso))
-      : data.specialties;
+    const filtersActive = anyFiltersActive();
+
+    const candidates = data.specialties.filter((s) => {
+      /* date filter: specialty must have at least one active link */
+      if (iso && !(linksBySpec.get(s.id) || []).some((l) => activeOn(l, iso))) {
+        return false;
+      }
+      /* journal-level filters: specialty must have at least one passing journal */
+      if (filtersActive && !specialtyHasPassingJournal(s)) {
+        return false;
+      }
+      return true;
+    });
 
     if (!isNumericQuery(q)) {
       return candidates
@@ -325,6 +450,7 @@
     url.searchParams.set("spec", String(s.id));
     url.searchParams.delete("journal");
     writeDateFilterState(url);
+    writeJournalFilterState(url);
     return url.href;
   }
 
@@ -335,11 +461,12 @@
     url.searchParams.set("journal", String(j.n));
     url.searchParams.delete("spec");
     writeDateFilterState(url);
+    writeJournalFilterState(url);
     return url.href;
   }
 
   function specialtyJournalCount(s) {
-    return (linksBySpec.get(s.id) || []).length;
+    return countPassingJournals(s);
   }
 
   function renderPopularSpecialties() {
@@ -350,6 +477,7 @@
     const bestByCode = new Map();
 
     for (const s of data.specialties) {
+      if (!specialtyHasPassingJournal(s)) continue;
       const code = normalizeSpecCode(s.code);
       const current = bestByCode.get(code);
       if (!current || specialtyJournalCount(s) > specialtyJournalCount(current)) {
@@ -365,9 +493,9 @@
       }
     }
 
-    const topByJournalCount = [...data.specialties].sort(
-      (a, b) => specialtyJournalCount(b) - specialtyJournalCount(a)
-    );
+    const topByJournalCount = [...data.specialties]
+      .filter((s) => specialtyHasPassingJournal(s))
+      .sort((a, b) => specialtyJournalCount(b) - specialtyJournalCount(a));
     for (const s of topByJournalCount) {
       if (selected.length >= 16) break;
       if (!selectedIds.has(s.id)) {
@@ -490,6 +618,15 @@
     return "";
   }
 
+  function renderVakBlock(j) {
+    if (!j.vak_cat) return "";
+    return `<section class="rcsi-card"><div class="rcsi-heading">
+      <strong>Категория ВАК</strong>
+    </div>
+    <p class="rcsi-levels">${escapeHtml(j.vak_cat)}</p>
+    </section>`;
+  }
+
   function runSearch(q) {
     if (!q || q.length < 2) {
       el.suggestions.hidden = true;
@@ -524,6 +661,23 @@
     el.suggestions.hidden = false;
   }
 
+  function renderFilterBadges() {
+    const badges = [];
+    if (el.filterScopus.checked) {
+      badges.push("Scopus ✓");
+    }
+    const r = el.filterRcsiLevel.value;
+    if (r === "any") {
+      badges.push("РЦНИ есть");
+    } else if (r) {
+      badges.push(`РЦНИ ур. ${r}`);
+    }
+    if (el.filterVakCat.value) {
+      badges.push(`ВАК ${el.filterVakCat.value}`);
+    }
+    return badges.length ? `<span class="filter-badges">${badges.map((b) => `<span class="badge">${b}</span>`).join(" ")}</span>` : "";
+  }
+
   function renderJournalResults(journalNum) {
     const j = journalByNum.get(journalNum);
     if (!j) return;
@@ -540,6 +694,7 @@
     ]
       .filter(Boolean)
       .join(" · ");
+
     setPageMeta(
       `${j.name} — журнал ВАК`,
       `Журнал «${j.name}» в Перечне ВАК: ISSN ${j.issn || "не указан"}, ${links.length} специальностей${iso ? ` на ${formatIsoRu(iso)}` : ""}.`
@@ -547,7 +702,7 @@
 
     if (!links.length) {
       el.resultsBody.innerHTML =
-        `<div class="indexing-row">${renderRcsiBlock(j)}${renderScopusBlock(j)}</div>
+        `<div class="indexing-row">${renderVakBlock(j)}${renderRcsiBlock(j)}${renderScopusBlock(j)}</div>
         <p class="hint">Нет специальностей для выбранных условий (проверьте фильтр по дате).</p>`;
       return;
     }
@@ -559,7 +714,7 @@
       groups.get(key).push(link);
     }
 
-    let html = `<div class="indexing-row">${renderRcsiBlock(j)}${renderScopusBlock(j)}</div>`;
+    let html = `<div class="indexing-row">${renderVakBlock(j)}${renderRcsiBlock(j)}${renderScopusBlock(j)}</div>`;
     const sortedGroups = [...groups.keys()].sort((a, b) => a - b);
     for (const g of sortedGroups) {
       const items = groups.get(g);
@@ -591,21 +746,51 @@
     el.resultsBody.innerHTML = html;
   }
 
+  function renderJournalIndexBadges(j) {
+    const parts = [];
+    if (j.scopus && j.scopus.inScopus) {
+      parts.push(`<span class="idx-badge scopus">Scopus</span>`);
+    }
+    const r = j.rcsi;
+    if (r && r.inRcsi) {
+      const level = r.level_2025 ?? r.level_2023;
+      parts.push(`<span class="idx-badge rcsi">РЦНИ${level != null ? " " + level : ""}</span>`);
+    }
+    if (j.vak_cat) {
+      parts.push(`<span class="idx-badge vak-cat">${escapeHtml(j.vak_cat)}</span>`);
+    }
+    return parts.length ? `<span class="idx-badges">${parts.join("")}</span>` : "";
+  }
+
   function renderSpecResults(specId) {
     const s = specById.get(specId);
     if (!s) return;
     const iso = filterIso();
     let links = linksBySpec.get(specId) || [];
     links = links.filter((l) => activeOn(l, iso));
+    /* Apply journal-level filters */
+    links = links.filter((l) => {
+      const j = journalByNum.get(l.j);
+      return j && journalPassesFilters(j);
+    });
 
     const branch = s.branch ? `<span class="branch">${escapeHtml(s.branch)}</span>` : "";
     el.resultsTitle.innerHTML = `<span class="code">${escapeHtml(s.code)}</span> ${branch} ${escapeHtml(s.title)}`;
+
+    const totalBeforeFilter = totalPassingInSpecFilter(s);
+    const filterBadges = renderFilterBadges();
+    const countInfo = anyFiltersActive()
+      ? `${links.length} из ${totalBeforeFilter} журналов`
+      : `${links.length} журналов`;
+
     el.resultsMeta.innerHTML = [
       iso ? `актуально на ${formatIsoRu(iso)}` : null,
-      `${links.length} журналов`,
+      countInfo,
+      filterBadges || null,
     ]
       .filter(Boolean)
       .join(" · ");
+
     setPageMeta(
       `${s.code} ${s.title} — журналы ВАК`,
       `Журналы из Перечня ВАК по специальности ${s.code} ${s.title}: ${links.length} журналов${s.passport ? ", есть ссылка на паспорт специальности" : ""}${iso ? ` на ${formatIsoRu(iso)}` : ""}.`
@@ -614,7 +799,7 @@
     if (!links.length) {
       el.resultsBody.innerHTML =
         `${renderPassportLink(s)}
-        <p class="hint">Нет журналов для выбранных условий.</p>`;
+        <p class="hint">Нет журналов для выбранных условий (проверьте фильтры).</p>`;
       return;
     }
 
@@ -622,11 +807,18 @@
     let html = `${renderPassportLink(s)}<ul class="result-list">`;
     for (const link of links) {
       const j = journalByNum.get(link.j);
+      const issnHtml = j.issn ? `<span class="branch">ISSN ${escapeHtml(j.issn)}</span>` : "";
+      const sep = j.issn ? `<span class="meta-sep">·</span>` : "";
       html += `<li class="result-item clickable">
         <a class="result-link" href="${escapeHtml(journalUrl(j))}">
           <strong>№ ${j.n}</strong> ${escapeHtml(j.name)}
-          ${j.issn ? `<p class="branch">ISSN ${escapeHtml(j.issn)}</p>` : ""}
-          <p class="dates">${formatDates(link)}</p>
+          <div class="journal-meta-row">
+            <span class="journal-meta-left">
+              <span class="dates">${formatDates(link)}</span>
+              ${sep} ${issnHtml}
+            </span>
+            <span class="journal-meta-right">${renderJournalIndexBadges(j)}</span>
+          </div>
         </a>
       </li>`;
     }
@@ -653,6 +845,7 @@
     const state = readUrlState();
     setMode(state.mode, { syncUrl: false, focus: false });
     applyDateFilterState(state.dateFilter);
+    applyJournalFilterState(state.journalFilter);
     el.search.value = state.query;
     selectedJournal = null;
     selectedSpec = null;
@@ -731,6 +924,7 @@
     writeUrlState();
   });
 
+  /* Filter change events */
   el.filterDate.addEventListener("change", () => {
     el.date.disabled = !el.filterDate.checked;
     if (selectedJournal != null || selectedSpec != null) showResults();
@@ -740,6 +934,27 @@
   });
 
   el.date.addEventListener("change", () => {
+    if (selectedJournal != null || selectedSpec != null) showResults();
+    renderPopularSpecialties();
+    refreshSearchIfTyping();
+    writeUrlState();
+  });
+
+  el.filterScopus.addEventListener("change", () => {
+    if (selectedJournal != null || selectedSpec != null) showResults();
+    renderPopularSpecialties();
+    refreshSearchIfTyping();
+    writeUrlState();
+  });
+
+  el.filterRcsiLevel.addEventListener("change", () => {
+    if (selectedJournal != null || selectedSpec != null) showResults();
+    renderPopularSpecialties();
+    refreshSearchIfTyping();
+    writeUrlState();
+  });
+
+  el.filterVakCat.addEventListener("change", () => {
     if (selectedJournal != null || selectedSpec != null) showResults();
     renderPopularSpecialties();
     refreshSearchIfTyping();

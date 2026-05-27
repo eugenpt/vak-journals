@@ -8,6 +8,7 @@ venv/
 
 # Downloaded PDF (fetch via script; do not commit)
 data/*.pdf
+data/*.txt
 data/rcsi_cache.json
 
 # Generated outputs (rebuild with scripts)
